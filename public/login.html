@@ -1,0 +1,5 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登入｜台南開發地圖</title>
+<style>body{font-family:"Noto Sans TC",sans-serif;background:#0b3d91;display:flex;height:100vh;margin:0;align-items:center;justify-content:center}
+form{background:#fff;padding:24px;border-radius:8px;width:300px}input,button{width:100%;padding:9px;margin-top:8px;font-size:15px;box-sizing:border-box}button{background:#0b3d91;color:#fff;border:0;border-radius:4px}</style></head>
+<body><form id=f><h2>台南 團險/產責險 開發地圖</h2><input id=u placeholder="帳號" autocomplete=username><input id=p type=password placeholder="密碼" autocomplete=current-password><button>登入</button><div id=e style="color:#c00;margin-top:8px"></div></form>
+<script>f.onsubmit=async ev=>{ev.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},body:JSON.stringify({username:u.value,password:p.value})});if(r.ok)location='/';else e.textContent=(await r.json()).error}</script></body></html>

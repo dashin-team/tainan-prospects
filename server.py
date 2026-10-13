@@ -1,0 +1,208 @@
+"""台南團險/產責險開發追蹤系統 後端（Python 標準函式庫 + openpyxl）。資料存在 data.json，多人共用。"""
+import json, os, io, threading, time, uuid, datetime
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import openpyxl, hashlib, secrets, hmac
+import storage
+def _j(p,d):
+    try: return json.load(open(p))
+    except Exception: return d
+def hashpw(pw,salt=None):
+    salt=salt or secrets.token_hex(16); return salt+"$"+hashlib.pbkdf2_hmac("sha256",pw.encode(),salt.encode(),200000).hex()
+def checkpw(pw,h):
+    salt=h.split("$")[0]; return hmac.compare_digest(hashpw(pw,salt),h)
+def secret():
+    k=os.environ.get("SECRET_KEY") or storage.get("secret")
+    if not k: k=secrets.token_hex(32); storage.put("secret",k)
+    return k.encode()
+SECRET=None
+def make_token(user):
+    global SECRET; SECRET=SECRET or secret()
+    p=json.dumps({"u":user,"e":int(time.time())+30*86400},ensure_ascii=False).encode().hex()
+    return p+"."+hmac.new(SECRET,p.encode(),hashlib.sha256).hexdigest()
+def read_token(t):
+    global SECRET; SECRET=SECRET or secret()
+    p,_,sig=t.partition(".")
+    if not sig or not hmac.compare_digest(sig,hmac.new(SECRET,p.encode(),hashlib.sha256).hexdigest()): return None
+    d=json.loads(bytes.fromhex(p)); return d["u"] if d["e"]>time.time() else None
+def bootstrap_users():
+    us=storage.get("users",{}) or {}
+    for pair in filter(None,os.environ.get("INIT_USERS","").split(",")):
+        n,_,pw=pair.partition(":")
+        if n.strip() and pw and n.strip() not in us: us[n.strip()]=hashpw(pw)
+    storage.put("users",us); return us
+PUBLIC={"/login.html","/api/login","/healthz"}
+D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
+BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note"]
+BH=["ID","名稱","類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註"]
+VF=["id","business_id","business_name","district","date","visitor","contact","interest_group","interest_pl","status","next_followup","notes","created_by","updated"]
+VH=["紀錄ID","店家ID","店家名稱","行政區","拜訪日期","拜訪人","聯絡人","團險興趣","產責險興趣","狀態","下次追蹤日","備註","登錄帳號","更新時間"]
+def load():
+    db=storage.get("db")
+    if db is None:
+        seed=json.load(open(os.path.join(D,"seed_businesses.json")))
+        for b in seed: b.setdefault("status","未拜訪")
+        db={"businesses":seed,"visits":[],"meta":{"last_refresh":"初始資料 2026-10-13"}}; save(db)
+    return db
+def save(db): storage.put("db",db)
+def merge_businesses(db,new):
+    idx={b["id"]:b for b in db["businesses"]}; added=updated=0
+    for n in new:
+        if n["id"] in idx:
+            o=idx[n["id"]]
+            for k in ("name","category","subtype","district","lat","lng","source"):
+                o[k]=n[k]
+            for k in ("address","phone","website"):   # 不覆蓋使用者手動填的
+                if n.get(k) and not o.get(k): o[k]=n[k]
+            updated+=1
+        else:
+            n["status"]="未拜訪"; db["businesses"].append(n); added+=1
+    return added,updated
+def xlsx(sheets):
+    wb=openpyxl.Workbook(); wb.remove(wb.active)
+    for title,hdr,fields,rows in sheets:
+        ws=wb.create_sheet(title); ws.append(hdr)
+        for r in rows: ws.append([("是" if r.get(f) is True else "否" if r.get(f) is False else r.get(f,"")) for f in fields])
+        for i,h in enumerate(hdr): ws.column_dimensions[openpyxl.utils.get_column_letter(i+1)].width=max(10,min(40,len(h)*3))
+        ws.freeze_panes="A2"; ws.auto_filter.ref=ws.dimensions
+    b=io.BytesIO(); wb.save(b); return b.getvalue()
+def read_sheet(ws,hdr,fields):
+    rows=list(ws.iter_rows(values_only=True))
+    if not rows: return []
+    m={h:i for i,h in enumerate(rows[0])}; out=[]
+    for r in rows[1:]:
+        if not any(r): continue
+        d={}
+        for h,f in zip(hdr,fields):
+            if h in m:
+                v=r[m[h]]
+                if isinstance(v,(datetime.date,datetime.datetime)): v=v.strftime("%Y-%m-%d")
+                d[f]="" if v is None else v
+        for f in("interest_group","interest_pl"):
+            if f in d: d[f]= str(d[f]).strip() in("是","True","TRUE","1","Y","y")
+        out.append(d)
+    return out
+class H(SimpleHTTPRequestHandler):
+    def __init__(s,*a,**k): super().__init__(*a,directory=os.path.join(D,"public"),**k)
+    def send_json(s,o,code=200):
+        b=json.dumps(o,ensure_ascii=False).encode(); s.send_response(code)
+        s.send_header("Content-Type","application/json; charset=utf-8"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b)
+    def body(s): return s.rfile.read(int(s.headers.get("Content-Length",0)))
+    def user(s):
+        for c in s.headers.get("Cookie","").split(";"):
+            k,_,v=c.strip().partition("=")
+            if k=="tp_session":
+                try:
+                    u=read_token(v)
+                    if u: return u
+                except Exception: pass
+    def guard(s):
+        p=urlparse(s.path).path
+        if p in PUBLIC or s.user(): return False
+        if p.startswith("/api/"): s.send_json({"error":"請先登入"},401)
+        else: s.send_response(302); s.send_header("Location","/login.html"); s.end_headers()
+        return True
+    def do_GET(s):
+        if s.guard(): return
+        u=urlparse(s.path); q=parse_qs(u.query)
+        if u.path=="/api/me": return s.send_json({"user":s.user()})
+        if u.path=="/api/logout":
+            s.send_response(302); s.send_header("Set-Cookie","tp_session=; Max-Age=0; Path=/"); s.send_header("Location","/login.html"); s.end_headers(); return
+        if u.path=="/healthz": return s.send_json({"ok":True,"storage":storage.backend()})
+        if u.path=="/api/data":
+            with LOCK: return s.send_json(load())
+        if u.path=="/api/export.xlsx":
+            with LOCK: db=load()
+            t=q.get("type",["all"])[0]; sh=[]
+            if t in("visits","all"): sh.append(("拜訪紀錄",VH,VF,sorted(db["visits"],key=lambda v:v.get("date",""),reverse=True)))
+            if t in("businesses","all"): sh.append(("店家名單",BH,BF,db["businesses"]))
+            b=xlsx(sh); s.send_response(200)
+            s.send_header("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            s.send_header("Content-Disposition",f"attachment; filename=tainan_{t}_{datetime.date.today()}.xlsx"); s.send_header("Content-Length",len(b)); s.end_headers(); return s.wfile.write(b)
+        return super().do_GET()
+    def do_POST(s):
+        if s.guard(): return
+        u=urlparse(s.path)
+        try:
+            if u.path=="/api/login":
+                d=json.loads(s.body()); us=storage.get("users",{}) or {}; n=d.get("username","").strip()
+                if n not in us or not checkpw(d.get("password",""),us[n]):
+                    time.sleep(1); return s.send_json({"error":"帳號或密碼錯誤"},401)
+                t=make_token(n)
+                sec="; Secure" if s.headers.get("X-Forwarded-Proto")=="https" or any(x in s.headers.get("Host","") for x in ("trycloudflare","ngrok")) else ""
+                b=b'{"ok":true}'; s.send_response(200); s.send_header("Content-Type","application/json")
+                s.send_header("Set-Cookie",f"tp_session={t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b); return
+            if u.path=="/api/business":
+                b=json.loads(s.body())
+                with LOCK:
+                    db=load()
+                    if not b.get("id"): b["id"]="manual-"+uuid.uuid4().hex[:8]; b.setdefault("source","手動新增"); b.setdefault("status","未拜訪"); db["businesses"].append(b)
+                    else:
+                        o=next(x for x in db["businesses"] if x["id"]==b["id"]); o.update(b); b=o
+                    save(db)
+                return s.send_json(b)
+            if u.path=="/api/visit":
+                v=json.loads(s.body())
+                with LOCK:
+                    db=load(); bz=next(x for x in db["businesses"] if x["id"]==v["business_id"])
+                    v["business_name"]=bz["name"]; v["district"]=bz["district"]
+                    if v.get("id"): db["visits"]=[x for x in db["visits"] if x["id"]!=v["id"]]
+                    else: v["id"]=uuid.uuid4().hex[:10]
+                    v["updated"]=time.strftime("%Y-%m-%d %H:%M"); v["created_by"]=s.user(); db["visits"].append(v)
+                    if v.get("status"): bz["status"]=v["status"]
+                    save(db)
+                return s.send_json(v)
+            if u.path=="/api/visit/delete":
+                i=json.loads(s.body())["id"]
+                with LOCK: db=load(); db["visits"]=[x for x in db["visits"] if x["id"]!=i]; save(db)
+                return s.send_json({"ok":True})
+            if u.path=="/api/refresh":
+                import fetch_osm
+                new=fetch_osm.fetch()
+                with LOCK:
+                    db=load(); a,up=merge_businesses(db,new); db["meta"]["last_refresh"]=time.strftime("%Y-%m-%d %H:%M"); save(db)
+                return s.send_json({"added":a,"updated":up,"total":len(db["businesses"])})
+            if u.path=="/api/import.json":
+                d=json.loads(s.body())
+                with LOCK:
+                    db=load(); a,_=merge_businesses(db,[b for b in d.get("businesses",[])])
+                    ids={v["id"] for v in db["visits"]}; nv=[v for v in d.get("visits",[]) if v.get("id") not in ids]; db["visits"]+=nv; save(db)
+                return s.send_json({"businesses_added":a,"visits_added":len(nv)})
+            if u.path=="/api/import.xlsx":
+                wb=openpyxl.load_workbook(io.BytesIO(s.body()),data_only=True); rb=rv=0
+                with LOCK:
+                    db=load(); bidx={b["id"]:b for b in db["businesses"]}
+                    if "店家名單" in wb.sheetnames:
+                        for r in read_sheet(wb["店家名單"],BH,BF):
+                            for k in("lat","lng"):
+                                try: r[k]=float(r[k])
+                                except: r.pop(k,None)
+                            if r.get("id") in bidx: bidx[r["id"]].update({k:v for k,v in r.items()}); rb+=1
+                            elif r.get("name"):
+                                r["id"]=r.get("id") or "manual-"+uuid.uuid4().hex[:8]; r.setdefault("status","未拜訪"); r.setdefault("source","Excel 匯入")
+                                db["businesses"].append(r); bidx[r["id"]]=r; rb+=1
+                    if "拜訪紀錄" in wb.sheetnames:
+                        vidx={v["id"]:v for v in db["visits"]}
+                        for r in read_sheet(wb["拜訪紀錄"],VH,VF):
+                            if not r.get("business_id") or r["business_id"] not in bidx: continue
+                            if r.get("id") in vidx: vidx[r["id"]].update(r)
+                            else: r["id"]=r.get("id") or uuid.uuid4().hex[:10]; db["visits"].append(r)
+                            rv+=1
+                        for b in db["businesses"]:
+                            vs=sorted([v for v in db["visits"] if v["business_id"]==b["id"]],key=lambda v:str(v.get("date","")))
+                            if vs and vs[-1].get("status"): b["status"]=vs[-1]["status"]
+                    save(db)
+                return s.send_json({"businesses":rb,"visits":rv})
+        except Exception as e:
+            return s.send_json({"error":str(e)},500)
+        s.send_json({"error":"not found"},404)
+if __name__=="__main__":
+    import sys
+    if len(sys.argv)>2 and sys.argv[1]=="adduser":
+        us=storage.get("users",{}) or {}; pw=sys.argv[3] if len(sys.argv)>3 else secrets.token_urlsafe(12)
+        us[sys.argv[2]]=hashpw(pw); storage.put("users",us); print(sys.argv[2],pw,"(",storage.backend(),")"); sys.exit()
+    if len(sys.argv)>1 and sys.argv[1]=="import-json":   # 把本機 data.json 上傳到雲端資料庫
+        storage.put("db",json.load(open(sys.argv[2]))); print("imported to",storage.backend()); sys.exit()
+    bootstrap_users()
+    p=int(os.environ.get("PORT",8080)); print("http://0.0.0.0:%d"%p)
+    ThreadingHTTPServer(("0.0.0.0",p),H).serve_forever()

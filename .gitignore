@@ -1,0 +1,9 @@
+data.json
+data.backup-*.json
+users.json
+sessions.json
+secret.json
+*.log
+tunnel_url.txt
+__pycache__/
+*.tmp

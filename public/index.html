@@ -1,0 +1,100 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>台南團險/產責險 開發追蹤地圖</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif;display:flex;flex-direction:column;height:100vh}
+header{background:#0b3d91;color:#fff;padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+header h1{font-size:17px;margin:0 10px 0 0}header select,header input,header button{padding:5px 7px;border-radius:4px;border:1px solid #ccc;font-size:13px}
+header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-height:0}#map{flex:1}
+#side{width:400px;overflow:auto;border-left:1px solid #ddd;padding:10px;font-size:14px;background:#fafafa}
+#side h2{font-size:17px;margin:4px 0}label{display:block;margin-top:6px;font-size:13px;color:#444}
+#side input,#side select,#side textarea{width:100%;padding:5px;font-size:14px}.row{display:flex;gap:6px}.row>*{flex:1}
+.btn{background:#0b3d91;color:#fff;border:0;padding:7px 12px;border-radius:4px;margin-top:8px;cursor:pointer}.btn.g{background:#777}
+.visit{border:1px solid #ddd;background:#fff;border-radius:4px;padding:6px;margin:6px 0}.tag{display:inline-block;padding:1px 6px;border-radius:8px;color:#fff;font-size:12px}
+.legend{background:#fff;padding:6px;font-size:12px;line-height:18px}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
+#stats{font-size:12px;margin-left:auto}.li{padding:4px;border-bottom:1px solid #eee;cursor:pointer}.li:hover{background:#eef}
+@media(max-width:800px){#main{flex-direction:column}#side{width:100%;height:45%}}
+</style></head><body>
+<header><h1>台南 團險/產責險 開發地圖</h1>
+<select id="fd"><option value="">全部行政區</option></select>
+<select id="fc"><option value="">全部類別</option></select>
+<select id="fs"><option value="">全部狀態</option></select>
+<input id="q" placeholder="搜尋名稱/地址/電話" size="14">
+<label style="color:#fff;margin:0"><input type="checkbox" id="fp"> 只看有電話</label>
+<label style="color:#fff;margin:0"><input type="checkbox" id="ff"> 待追蹤</label>
+<button onclick="newBiz()">＋新增店家</button>
+<button onclick="refreshList()">⟳ 更新店家/工廠名單</button>
+<button onclick="location='/api/export.xlsx?type=visits'">匯出拜訪紀錄.xlsx</button>
+<button onclick="location='/api/export.xlsx?type=businesses'">匯出店家名單.xlsx</button>
+<button onclick="location='/api/export.xlsx?type=all'">匯出全部.xlsx</button>
+<button onclick="imp.click()">匯入 xlsx/json</button><input type="file" id="imp" accept=".xlsx,.json" hidden>
+<button onclick="exportJSON()">備份 JSON</button>
+<span id="stats"></span><span id="me" style="font-size:12px"></span> <a href="/api/logout" style="color:#fff;font-size:12px">登出</a></header>
+<div id="main"><div id="map"></div><div id="side"></div></div>
+<script>
+const ST={"未拜訪":"#9e9e9e","已聯絡":"#1e88e5","有興趣":"#fb8c00","已成交":"#43a047","不需要":"#e53935"};
+const DS=["南區","北區","東區","中西區","安南區","永康區","安定區"];
+let DB={businesses:[],visits:[],meta:{}},layer,cur=null,online=true;
+const map=L.map('map',{preferCanvas:true}).setView([23.0,120.21],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
+const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML=Object.entries(ST).map(([k,c])=>`<span class=dot style="background:${c}"></span>${k}`).join('<br>');return d};lg.addTo(map);
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,b){const r=await fetch(p,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},body:typeof b==='string'||b instanceof Blob?b:JSON.stringify(b)});if(r.status===401){location='/login.html';throw Error('未登入')}const j=await r.json();if(j.error)throw Error(j.error);return j}
+async function load(){try{DB=await api('/api/data');online=true;localStorage.setItem('tp_db',JSON.stringify(DB))}catch(e){online=false;DB=JSON.parse(localStorage.getItem('tp_db')||'{"businesses":[],"visits":[],"meta":{}}');alert('無法連線伺服器，顯示本機快取資料（唯讀）')}
+ fill();draw();}
+function fill(){const opt=(el,arr)=>{const v=el.value;el.length=1;arr.forEach(x=>el.add(new Option(x,x)));el.value=v};
+ opt($('fd'),DS);opt($('fc'),[...new Set(DB.businesses.map(b=>b.category))].sort());opt($('fs'),Object.keys(ST));}
+function lastVisit(id){return DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date))[0]}
+function filtered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q').value.trim(),today=new Date().toISOString().slice(0,10);
+ return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)
+ &&(!q||[b.name,b.address,b.phone].join(' ').includes(q))&&(!$('ff').checked||((lastVisit(b.id)||{}).next_followup||'9')<=today))}
+function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);const f=filtered();
+ f.forEach(b=>{if(b.lat==null||b.lat==='')return;L.circleMarker([b.lat,b.lng],{radius:b.status&&b.status!=='未拜訪'?8:5,color:'#333',weight:1,fillColor:ST[b.status||'未拜訪'],fillOpacity:.85})
+ .bindTooltip(esc(b.name)).on('click',()=>show(b.id)).addTo(layer)});
+ const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
+ $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜名單更新：${esc(DB.meta.last_refresh||'')}`;
+ if(!cur)listView(f)}
+function listView(f){const today=new Date().toISOString().slice(0,10);
+ const fu=DB.visits.filter(v=>v.next_followup).sort((a,b)=>a.next_followup.localeCompare(b.next_followup)).slice(0,30);
+ $('side').innerHTML=`<h2>待追蹤（依下次追蹤日）</h2>${fu.map(v=>`<div class=li onclick="show('${v.business_id}')">${v.next_followup<=today?'⚠️':''}${esc(v.next_followup)} ${esc(v.business_name)}｜${esc(v.visitor)}｜${esc(v.status)}</div>`).join('')||'<i>尚無</i>'}
+ <h2 style="margin-top:12px">名單（前 200 筆，點選定位）</h2>${f.slice(0,200).map(b=>`<div class=li onclick="show('${b.id}',1)"><span class=dot style="background:${ST[b.status||'未拜訪']}"></span>${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}</small></div>`).join('')}`}
+function show(id,fly){cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(fly&&b.lat)map.setView([b.lat,b.lng],17);
+ const vs=DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date));const me=localStorage.getItem('tp_visitor')||'',today=new Date().toISOString().slice(0,10);
+ $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回清單</button>
+ <h2>${esc(b.name)} <span class=tag style="background:${ST[b.status||'未拜訪']}">${esc(b.status||'未拜訪')}</span></h2>
+ <div>${esc(b.district)}｜${esc(b.category)} ${esc(b.subtype)}</div><div>📍 ${esc(b.address)||'<i>地址未知</i>'}</div>
+ <div>📞 ${b.phone?`<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>`:'<i>電話未知</i>'}</div>${b.website?`<div>🌐 <a target=_blank href="${esc(b.website)}">${esc(b.website)}</a></div>`:''}
+ <div><a target=_blank href="https://www.google.com/maps/search/${encodeURIComponent(b.name+' '+b.district)}">Google 地圖搜尋</a>｜<small>${esc(b.source)}</small></div>
+ <button class="btn g" onclick="editBiz('${id}')">編輯店家資料</button>
+ <h2 style="margin-top:12px">新增拜訪紀錄</h2>
+ <div class=row><div><label>拜訪日期</label><input type=date id=vd value="${today}"></div><div><label>拜訪人</label><input id=vv value="${esc(me)}"></div></div>
+ <label>聯絡人（對方窗口）</label><input id=vc>
+ <div class=row><label><input type=checkbox id=vg style="width:auto"> 團險有興趣</label><label><input type=checkbox id=vp style="width:auto"> 產責險有興趣</label></div>
+ <div class=row><div><label>狀態</label><select id=vs>${Object.keys(ST).map(s=>`<option ${s===(b.status&&b.status!=='未拜訪'?b.status:'已聯絡')?'selected':''}>${s}</option>`).join('')}</select></div><div><label>下次追蹤日</label><input type=date id=vn></div></div>
+ <label>備註</label><textarea id=vt rows=3></textarea><button class=btn onclick="addVisit('${id}')">儲存紀錄</button>
+ <h2 style="margin-top:12px">拜訪歷史（${vs.length}）</h2>${vs.map(v=>`<div class=visit><b>${esc(v.date)}</b> ${esc(v.visitor)} <span class=tag style="background:${ST[v.status]||'#999'}">${esc(v.status)}</span>
+ <div>聯絡人：${esc(v.contact)}｜團險：${v.interest_group?'有':'—'}｜產責：${v.interest_pl?'有':'—'}</div><div>下次追蹤：${esc(v.next_followup)||'—'}　<small>登錄：${esc(v.created_by||'')}</small></div><div style="white-space:pre-wrap">${esc(v.notes)}</div>
+ <a href="#" onclick="delVisit('${v.id}');return false" style="color:#c00;font-size:12px">刪除</a></div>`).join('')||'<i>尚無紀錄</i>'}`}
+async function addVisit(id){const v={business_id:id,date:$('vd').value,visitor:$('vv').value.trim(),contact:$('vc').value,interest_group:$('vg').checked,interest_pl:$('vp').checked,status:$('vs').value,next_followup:$('vn').value,notes:$('vt').value};
+ if(!v.visitor)return alert('請填拜訪人');localStorage.setItem('tp_visitor',v.visitor);await api('/api/visit',v);await load();show(id)}
+async function delVisit(i){if(!confirm('確定刪除此紀錄？'))return;await api('/api/visit/delete',{id:i});await load();show(cur)}
+function bizForm(b){const c=map.getCenter();b=b||{lat:c.lat.toFixed(6),lng:c.lng.toFixed(6),district:$('fd').value||'東區',category:'工廠/製造'};
+ $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回</button><h2>${b.id?'編輯':'新增'}店家/工廠</h2>
+ ${[['name','名稱'],['address','地址'],['phone','電話'],['website','網站'],['subtype','細類'],['note','備註']].map(([k,l])=>`<label>${l}</label><input id=b_${k} value="${esc(b[k])}">`).join('')}
+ <label>行政區</label><select id=b_district>${DS.map(d=>`<option ${d===b.district?'selected':''}>${d}</option>`).join('')}</select>
+ <label>類別</label><input id=b_category list=cats value="${esc(b.category)}"><datalist id=cats>${[...new Set(DB.businesses.map(x=>x.category))].map(x=>`<option>${esc(x)}`).join('')}</datalist>
+ <div class=row><div><label>緯度</label><input id=b_lat value="${esc(b.lat)}"></div><div><label>經度</label><input id=b_lng value="${esc(b.lng)}"></div></div>
+ <small>提示：在地圖上點一下可帶入座標</small><br><button class=btn onclick="saveBiz('${b.id||''}')">儲存</button>`;
+ map.once('click',e=>{if($('b_lat')){$('b_lat').value=e.latlng.lat.toFixed(6);$('b_lng').value=e.latlng.lng.toFixed(6)}})}
+function newBiz(){cur='new';bizForm()}function editBiz(id){bizForm(DB.businesses.find(x=>x.id===id))}
+async function saveBiz(id){const b={};['name','address','phone','website','subtype','note','district','category','lat','lng'].forEach(k=>b[k]=$('b_'+k).value.trim());
+ if(!b.name)return alert('請填名稱');b.lat=parseFloat(b.lat);b.lng=parseFloat(b.lng);if(id)b.id=id;const r=await api('/api/business',b);await load();show(r.id,1)}
+async function refreshList(){if(!confirm('從 OpenStreetMap 重新抓取台南七區店家/工廠？\n新店家會加入，既有拜訪紀錄與手動資料不會遺失（約需 10–60 秒）'))return;
+ $('stats').textContent='更新中…';try{const r=await api('/api/refresh',{});alert(`更新完成：新增 ${r.added} 家、更新 ${r.updated} 家，共 ${r.total} 家`)}catch(e){alert('更新失敗：'+e.message)}load()}
+function exportJSON(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));a.download='tainan_backup.json';a.click()}
+$('imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=f.name.endsWith('.json')?await api('/api/import.json',await f.text()):await api('/api/import.xlsx',f);alert('匯入完成：'+JSON.stringify(r))}catch(x){alert('匯入失敗：'+x.message)}e.target.value='';load()};
+['fd','fc','fs','fp','ff'].forEach(i=>$(i).onchange=()=>{cur=null;draw()});$('q').oninput=()=>{cur=null;draw()};
+fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';$('me').textContent='　👤 '+j.user;if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user)});
+load();
+</script></body></html>
