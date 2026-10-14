@@ -62,7 +62,7 @@ function fill(){const opt=(el,arr)=>{const v=el.value;el.length=1;arr.forEach(x=
  opt($('fd'),DS);opt($('fc'),[...new Set(DB.businesses.map(b=>b.category))].sort());opt($('fs'),Object.keys(ST));}
 function lastVisit(id){return DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date))[0]}
 const PLC=['工廠','工廠/製造','食品製造','餐飲','食品零售'],PLS=new Set('bakery pastry confectionery deli tea coffee beverages butcher cheese chocolate pasta ice_cream dairy rice health_food nutrition_supplements herbalist food farm bbq marketplace craft pottery leather tailor shoemaker carpenter metal_construction machine_shop works factory industrial kitchen furniture perfumery'.split(' ')),PLN=/食品|烘焙|麵包|蛋糕|糕餅|餅|茶|咖啡|飲料|冰|豆花|小吃|餐|麵|飯|食|肉|製造|工業|工廠|實業|加工|手作|釀/;
-function plAuto(b){return PLC.includes(b.category)||PLS.has(b.subtype)||PLN.test(b.name||'')}
+function plAuto(b){return b.source==='非登不可'||PLC.includes(b.category)||PLS.has(b.subtype)||PLN.test(b.name||'')}
 function isPL(b){return b.pl==='Y'?true:b.pl==='N'?false:plAuto(b)}
 function g5(b){return b.group5===true||Number(b.employees)>=5}
 const VN={shihhan:'仕翰'};function vn(x){return VN[x]||x}
@@ -116,8 +116,10 @@ function bizForm(b){const c=map.getCenter();b=b||{lat:c.lat.toFixed(6),lng:c.lng
 function newBiz(){cur='new';bizForm()}function editBiz(id){bizForm(DB.businesses.find(x=>x.id===id))}
 async function saveBiz(id){const b={};['name','address','phone','website','subtype','employees','note','district','category','lat','lng','pl'].forEach(k=>b[k]=$('b_'+k).value.trim());b.employees=b.employees?parseInt(b.employees)||'':'';b.group5=Number(b.employees)>=5;
  if(!b.name)return alert('請填名稱');b.lat=parseFloat(b.lat);b.lng=parseFloat(b.lng);if(id)b.id=id;const r=await api('/api/business',b);await load();show(r.id,1)}
-async function refreshList(){if(!confirm('從 OpenStreetMap 重新抓取台南七區店家/工廠？\n新店家會加入，既有拜訪紀錄與手動資料不會遺失（約需 10–60 秒）'))return;
- $('stats').textContent='更新中…';try{const r=await api('/api/refresh',{});alert(`更新完成：新增 ${r.added} 家、更新 ${r.updated} 家，共 ${r.total} 家`)}catch(e){alert('更新失敗：'+e.message)}load()}
+async function refreshList(){if(!confirm('重新抓取 OpenStreetMap 店家 + 非登不可食品業者登錄（台南七區）？\n只會新增非連鎖的新店家，既有拜訪紀錄與手動資料不會遺失（約需 2–8 分鐘，背景執行）'))return;
+ try{await api('/api/refresh',{})}catch(e){return alert('更新失敗：'+e.message)}
+ const tick=async()=>{try{const r=await (await fetch('/api/refresh_status',{cache:'no-store'})).json();if(r.running){$('stats').textContent='名單更新中：'+(r.step||'')+'…';return setTimeout(tick,5000)}
+ const x=r.result||{};alert(`更新完成：OSM 新增 ${x.osm_added??'-'} 家、更新 ${x.osm_updated??'-'} 家；非登不可新增 ${x.fda_added??'-'} 家（排除連鎖 ${x.fda_chains_removed??'-'}、重複 ${x.fda_duplicates??'-'}）；共 ${x.total} 家`+(x.osm_error?'\nOSM 錯誤：'+x.osm_error:'')+(x.fda_error?'\n非登不可錯誤：'+x.fda_error:''));load()}catch(e){setTimeout(tick,8000)}};tick()}
 function exportJSON(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));a.download='tainan_backup.json';a.click()}
 $('imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=f.name.endsWith('.json')?await api('/api/import.json',await f.text()):await api('/api/import.xlsx',f);alert('匯入完成：'+JSON.stringify(r))}catch(x){alert('匯入失敗：'+x.message)}e.target.value='';load()};
 ['fd','fc','fs','fp','ff','fx','fl'].forEach(i=>$(i).onchange=()=>{cur=null;draw();doSearch()});$('q').oninput=()=>{cur=null;draw()};$('sq').oninput=doSearch;$('sq').onkeydown=e=>{if(e.key==='Enter'){const f=$('sres').querySelector('.li');if(f)f.click()}if(e.key==='Escape')$('sres').innerHTML=''};

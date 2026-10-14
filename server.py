@@ -61,6 +61,31 @@ def merge_businesses(db,new):
         else:
             n["status"]="未拜訪"; db["businesses"].append(n); added+=1
     return added,updated
+REFRESH={}
+def do_refresh():
+    """背景更新：OpenStreetMap + 非登不可（只新增非連鎖新店家，既有資料與拜訪紀錄不動）。"""
+    res={}
+    try:
+        REFRESH["step"]="抓取 OpenStreetMap"
+        import fetch_osm
+        new=fetch_osm.fetch()
+        with LOCK:
+            db=load(); a,up=merge_businesses(db,new); save(db)
+        res["osm_added"]=a; res["osm_updated"]=up
+    except Exception as e: res["osm_error"]=str(e)[:200]
+    try:
+        REFRESH["step"]="下載非登不可食品業者登錄（約 1–3 分鐘）"
+        import fda_source
+        with LOCK: snap=list(load()["businesses"])
+        new,rm,dup=fda_source.fetch(snap,max_new_geo=300,log=lambda *a:REFRESH.update(step="地理編碼 %s/%s"%a[1:3]))
+        with LOCK:
+            db=load(); ids={b["id"] for b in db["businesses"]}; add=[b for b in new if b["id"] not in ids]
+            db["businesses"]+=add; save(db)
+        res["fda_added"]=len(add); res["fda_chains_removed"]=sum(rm.values()); res["fda_duplicates"]=dup
+    except Exception as e: res["fda_error"]=str(e)[:200]
+    with LOCK:
+        db=load(); db["meta"]["last_refresh"]=time.strftime("%Y-%m-%d %H:%M"); save(db); res["total"]=len(db["businesses"])
+    REFRESH.update(running=False,step="完成",result=res)
 def xlsx(sheets):
     wb=openpyxl.Workbook(); wb.remove(wb.active)
     for title,hdr,fields,rows in sheets:
@@ -91,6 +116,7 @@ PLN=re.compile("食品|烘焙|麵包|蛋糕|糕餅|餅|茶|咖啡|飲料|冰|豆
 def is_pl(b):
     if b.get("pl")=="Y": return True
     if b.get("pl")=="N": return False
+    if b.get("source")=="非登不可": return True
     return b.get("category") in PLC or b.get("subtype") in PLS or bool(PLN.search(str(b.get("name") or "")))
 class H(SimpleHTTPRequestHandler):
     def __init__(s,*a,**k): super().__init__(*a,directory=os.path.join(D,"public"),**k)
@@ -133,6 +159,7 @@ class H(SimpleHTTPRequestHandler):
         if u.path in("/","/index.html","/login.html"):
             fp=os.path.join(D,"public","index.html" if u.path=="/" else u.path[1:])
             with open(fp,"rb") as f: return s.send_bytes(f.read(),"text/html; charset=utf-8")
+        if u.path=="/api/refresh_status": return s.send_json(REFRESH)
         if u.path=="/api/data":
             with LOCK: db=load()
             # 精簡：去掉空值欄位（前端皆以 ||'' 處理）
@@ -212,11 +239,10 @@ class H(SimpleHTTPRequestHandler):
                     save(db)
                 return s.send_json({"ok":True,"business_status":st})
             if u.path=="/api/refresh":
-                import fetch_osm
-                new=fetch_osm.fetch()
-                with LOCK:
-                    db=load(); a,up=merge_businesses(db,new); db["meta"]["last_refresh"]=time.strftime("%Y-%m-%d %H:%M"); save(db)
-                return s.send_json({"added":a,"updated":up,"total":len(db["businesses"])})
+                if REFRESH.get("running"): return s.send_json({"started":False,"status":REFRESH})
+                REFRESH.clear(); REFRESH.update(running=True,step="開始",started=time.strftime("%H:%M:%S"))
+                threading.Thread(target=do_refresh,daemon=True).start()
+                return s.send_json({"started":True,"status":REFRESH})
             if u.path=="/api/import.json":
                 d=json.loads(s.body())
                 with LOCK:
