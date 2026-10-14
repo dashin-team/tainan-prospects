@@ -25,7 +25,7 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 <label style="color:#fff;margin:0"><input type="checkbox" id="fp"> 只看有電話</label>
 <label style="color:#fff;margin:0"><input type="checkbox" id="ff"> 待追蹤</label>
 <label style="color:#fff;margin:0"><input type="checkbox" id="fx"> 只看工廠</label>
-<label style="color:#fff;margin:0"><input type="checkbox" id="f5"> 團險5人以上</label>
+<label style="color:#fff;margin:0"><input type="checkbox" id="fl"> 產品責任險</label>
 <button class="adm" style="display:none" onclick="newBiz()">＋新增店家</button>
 <button class="adm" style="display:none" onclick="refreshList()">⟳ 更新店家/工廠名單</button>
 <button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=visits'">匯出拜訪紀錄.xlsx</button>
@@ -61,6 +61,9 @@ setInterval(sync,60000);
 function fill(){const opt=(el,arr)=>{const v=el.value;el.length=1;arr.forEach(x=>el.add(new Option(x,x)));el.value=v};
  opt($('fd'),DS);opt($('fc'),[...new Set(DB.businesses.map(b=>b.category))].sort());opt($('fs'),Object.keys(ST));}
 function lastVisit(id){return DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date))[0]}
+const PLC=['工廠','工廠/製造','食品製造','餐飲','食品零售'],PLS=new Set('bakery pastry confectionery deli tea coffee beverages butcher cheese chocolate pasta ice_cream dairy rice health_food nutrition_supplements herbalist food farm bbq marketplace craft pottery leather tailor shoemaker carpenter metal_construction machine_shop works factory industrial kitchen furniture perfumery'.split(' ')),PLN=/食品|烘焙|麵包|蛋糕|糕餅|餅|茶|咖啡|飲料|冰|豆花|小吃|餐|麵|飯|食|肉|製造|工業|工廠|實業|加工|手作|釀/;
+function plAuto(b){return PLC.includes(b.category)||PLS.has(b.subtype)||PLN.test(b.name||'')}
+function isPL(b){return b.pl==='Y'?true:b.pl==='N'?false:plAuto(b)}
 function g5(b){return b.group5===true||Number(b.employees)>=5}
 const VN={shihhan:'仕翰'};function vn(x){return VN[x]||x}
 let MK={};
@@ -69,13 +72,13 @@ function doSearch(){const q=$('sq').value.trim().toLowerCase(),el=$('sres');if(!
  el.innerHTML=`<div style="padding:4px 8px;color:#666">${r.length} 筆${r.length>50?'（顯示前 50）':''}</div>`+r.slice(0,50).map(b=>`<div class=li onclick="pick('${b.id}')">${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}<br>${esc(b.address)}</small></div>`).join('')}
 function pick(id){$('sres').innerHTML='';const b=DB.businesses.find(x=>x.id===id);if(b&&b.lat!=null&&b.lat!==''){map.flyTo([b.lat,b.lng],17);const m=MK[id];if(m)setTimeout(()=>m.openPopup(),400)}show(id)}
 function filtered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q').value.trim(),today=new Date().toISOString().slice(0,10);
- return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)&&(!$('fx').checked||String(b.category).startsWith('工廠'))&&(!$('f5').checked||g5(b))
+ return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)&&(!$('fx').checked||String(b.category).startsWith('工廠'))&&(!$('fl').checked||isPL(b))
  &&(!q||hay(b).includes(q.toLowerCase()))&&(!$('ff').checked||((lastVisit(b.id)||{}).next_followup||'9')<=today))}
 function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);MK={};const f=filtered();
  f.forEach(b=>{if(b.lat==null||b.lat==='')return;MK[b.id]=L.circleMarker([b.lat,b.lng],{radius:b.status&&b.status!=='未拜訪'?8:5,color:'#333',weight:1,fillColor:ST[b.status||'未拜訪'],fillOpacity:.85})
  .bindTooltip(esc(b.name)).bindPopup(()=>`<b>${esc(b.name)}</b><br>${esc(b.district)}｜${esc(b.category)}<br>${esc(b.address)}${b.phone?'<br>📞 '+esc(b.phone):''}`).on('click',()=>show(b.id)).addTo(layer)});
  const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
- $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜名單更新：${esc(DB.meta.last_refresh||'')}`;
+ $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜產責對象 ${DB.businesses.filter(isPL).length}｜團險有興趣 ${new Set(DB.visits.filter(v=>v.interest_group).map(v=>v.business_id)).size}｜產責有興趣 ${new Set(DB.visits.filter(v=>v.interest_pl).map(v=>v.business_id)).size}｜名單更新：${esc(DB.meta.last_refresh||'')}`;
  if(!cur)listView(f)}
 function listView(f){const today=new Date().toISOString().slice(0,10);
  const fu=DB.visits.filter(v=>v.next_followup).sort((a,b)=>a.next_followup.localeCompare(b.next_followup)).slice(0,30);
@@ -104,19 +107,20 @@ async function delVisit(i){if(!confirm('確定刪除此紀錄？'))return;const 
 function bizForm(b){const c=map.getCenter();b=b||{lat:c.lat.toFixed(6),lng:c.lng.toFixed(6),district:$('fd').value||'東區',category:'工廠/製造'};
  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回</button><h2>${b.id?'編輯':'新增'}店家/工廠</h2>
  ${[['name','名稱'],['address','地址'],['phone','電話'],['website','網站'],['subtype','細類'],['employees','員工人數'],['note','備註']].map(([k,l])=>`<label>${l}</label><input id=b_${k} value="${esc(b[k])}">`).join('')}
+ <label>產責對象</label><select id=b_pl><option value=''>自動判斷（目前：${plAuto(b)?'是':'否'}）</option><option value=Y ${b.pl==='Y'?'selected':''}>是</option><option value=N ${b.pl==='N'?'selected':''}>否</option></select>
  <label>行政區</label><select id=b_district>${DS.map(d=>`<option ${d===b.district?'selected':''}>${d}</option>`).join('')}</select>
  <label>類別</label><input id=b_category list=cats value="${esc(b.category)}"><datalist id=cats>${[...new Set(DB.businesses.map(x=>x.category))].map(x=>`<option>${esc(x)}`).join('')}</datalist>
  <div class=row><div><label>緯度</label><input id=b_lat value="${esc(b.lat)}"></div><div><label>經度</label><input id=b_lng value="${esc(b.lng)}"></div></div>
  <small>提示：在地圖上點一下可帶入座標</small><br><button class=btn onclick="saveBiz('${b.id||''}')">儲存</button>`;
  map.once('click',e=>{if($('b_lat')){$('b_lat').value=e.latlng.lat.toFixed(6);$('b_lng').value=e.latlng.lng.toFixed(6)}})}
 function newBiz(){cur='new';bizForm()}function editBiz(id){bizForm(DB.businesses.find(x=>x.id===id))}
-async function saveBiz(id){const b={};['name','address','phone','website','subtype','employees','note','district','category','lat','lng'].forEach(k=>b[k]=$('b_'+k).value.trim());b.employees=b.employees?parseInt(b.employees)||'':'';b.group5=Number(b.employees)>=5;
+async function saveBiz(id){const b={};['name','address','phone','website','subtype','employees','note','district','category','lat','lng','pl'].forEach(k=>b[k]=$('b_'+k).value.trim());b.employees=b.employees?parseInt(b.employees)||'':'';b.group5=Number(b.employees)>=5;
  if(!b.name)return alert('請填名稱');b.lat=parseFloat(b.lat);b.lng=parseFloat(b.lng);if(id)b.id=id;const r=await api('/api/business',b);await load();show(r.id,1)}
 async function refreshList(){if(!confirm('從 OpenStreetMap 重新抓取台南七區店家/工廠？\n新店家會加入，既有拜訪紀錄與手動資料不會遺失（約需 10–60 秒）'))return;
  $('stats').textContent='更新中…';try{const r=await api('/api/refresh',{});alert(`更新完成：新增 ${r.added} 家、更新 ${r.updated} 家，共 ${r.total} 家`)}catch(e){alert('更新失敗：'+e.message)}load()}
 function exportJSON(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));a.download='tainan_backup.json';a.click()}
 $('imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=f.name.endsWith('.json')?await api('/api/import.json',await f.text()):await api('/api/import.xlsx',f);alert('匯入完成：'+JSON.stringify(r))}catch(x){alert('匯入失敗：'+x.message)}e.target.value='';load()};
-['fd','fc','fs','fp','ff','fx','f5'].forEach(i=>$(i).onchange=()=>{cur=null;draw();doSearch()});$('q').oninput=()=>{cur=null;draw()};$('sq').oninput=doSearch;$('sq').onkeydown=e=>{if(e.key==='Enter'){const f=$('sres').querySelector('.li');if(f)f.click()}if(e.key==='Escape')$('sres').innerHTML=''};
+['fd','fc','fs','fp','ff','fx','fl'].forEach(i=>$(i).onchange=()=>{cur=null;draw();doSearch()});$('q').oninput=()=>{cur=null;draw()};$('sq').oninput=doSearch;$('sq').onkeydown=e=>{if(e.key==='Enter'){const f=$('sres').querySelector('.li');if(f)f.click()}if(e.key==='Escape')$('sres').innerHTML=''};
 fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';ME=j.user;$('me').textContent='　👤 '+j.user+(j.is_admin?'（管理員）':'');if(j.is_admin){ADM=true;document.querySelectorAll('.adm').forEach(e=>e.style.display='')}if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user)});
 let ADM=false,ME='';
 async function usersPanel(){cur='users';const r=await api('/api/users');

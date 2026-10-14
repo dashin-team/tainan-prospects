@@ -1,5 +1,5 @@
 """台南團險/產責險開發追蹤系統 後端（Python 標準函式庫 + openpyxl）。資料存在 data.json，多人共用。"""
-import gzip, json, os, io, threading, time, uuid, datetime
+import re, gzip, json, os, io, threading, time, uuid, datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import openpyxl, hashlib, secrets, hmac
@@ -36,8 +36,8 @@ def is_admin(u): return bool(u) and u in ADMINS
 ADMIN_POST={"/api/refresh","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
-BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","group5","geo_precision"]
-BH=["ID","名稱","類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註","產業類別","主要產品","工廠登記編號","統一編號","負責人","組織型態","資本額","員工人數","團險5人以上","座標精度"]
+BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
+BH=["ID","名稱","類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註","產業類別","主要產品","工廠登記編號","統一編號","負責人","組織型態","資本額","員工人數","座標精度","產責對象","產責手動設定"]
 VF=["id","business_id","business_name","district","date","visitor","contact","interest_group","interest_pl","status","next_followup","notes","created_by","updated"]
 VH=["紀錄ID","店家ID","店家名稱","行政區","拜訪日期","拜訪人","聯絡人","團險興趣","產責險興趣","狀態","下次追蹤日","備註","登錄帳號","更新時間"]
 def load():
@@ -83,8 +83,15 @@ def read_sheet(ws,hdr,fields):
                 d[f]="" if v is None else v
         for f in("interest_group","interest_pl","group5"):
             if f in d: d[f]= str(d[f]).strip() in("是","True","TRUE","1","Y","y")
-        out.append(d)
+        d.pop("pl_target",None); out.append(d)
     return out
+PLC={"工廠","工廠/製造","食品製造","餐飲","食品零售"}
+PLS=set("bakery pastry confectionery deli tea coffee beverages butcher cheese chocolate pasta ice_cream dairy rice health_food nutrition_supplements herbalist food farm bbq marketplace craft pottery leather tailor shoemaker carpenter metal_construction machine_shop works factory industrial kitchen furniture perfumery".split())
+PLN=re.compile("食品|烘焙|麵包|蛋糕|糕餅|餅|茶|咖啡|飲料|冰|豆花|小吃|餐|麵|飯|食|肉|製造|工業|工廠|實業|加工|手作|釀")
+def is_pl(b):
+    if b.get("pl")=="Y": return True
+    if b.get("pl")=="N": return False
+    return b.get("category") in PLC or b.get("subtype") in PLS or bool(PLN.search(str(b.get("name") or "")))
 class H(SimpleHTTPRequestHandler):
     def __init__(s,*a,**k): super().__init__(*a,directory=os.path.join(D,"public"),**k)
     def send_bytes(s,b,ctype,code=200):
@@ -134,7 +141,7 @@ class H(SimpleHTTPRequestHandler):
             with LOCK: db=load()
             t=q.get("type",["all"])[0]; sh=[]
             if t in("visits","all"): sh.append(("拜訪紀錄",VH,VF,sorted(db["visits"],key=lambda v:v.get("date",""),reverse=True)))
-            if t in("businesses","all"): sh.append(("店家名單",BH,BF,db["businesses"]))
+            if t in("businesses","all"): sh.append(("店家名單",BH,BF,[{**b,"pl_target":is_pl(b)} for b in db["businesses"]]))
             b=xlsx(sh); s.send_response(200)
             s.send_header("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             s.send_header("Content-Disposition",f"attachment; filename=tainan_{t}_{datetime.date.today()}.xlsx"); s.send_header("Content-Length",len(b)); s.end_headers(); return s.wfile.write(b)
