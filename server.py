@@ -33,7 +33,7 @@ def bootstrap_users():
     storage.put("users",us); return us
 ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}
 def is_admin(u): return bool(u) and u in ADMINS
-ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset"}
+ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
 BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
@@ -197,6 +197,21 @@ class H(SimpleHTTPRequestHandler):
                         else: us[n]=hashpw(os.environ.get("DEFAULT_PASSWORD","1234"))
                     storage.put("users",us)
                 return s.send_json({"ok":True})
+            if u.path in("/api/users/password","/api/users/password_all"):   # 僅管理員
+                d=json.loads(s.body()); pw=str(d.get("password") or "")
+                if len(pw)<4 or len(pw)>100: return s.send_json({"error":"密碼至少 4 個字"},400)
+                h=hashpw(pw); cnt=0
+                with LOCK:
+                    us=storage.get("users",{}) or {}
+                    if u.path.endswith("_all"):
+                        for n in us:
+                            if not is_admin(n): us[n]=h; cnt+=1
+                    else:
+                        n=str(d.get("username") or "").strip()
+                        if n not in us: return s.send_json({"error":"帳號不存在"},404)
+                        us[n]=h; cnt=1
+                    storage.put("users",us)
+                return s.send_json({"ok":True,"count":cnt})
             if u.path=="/api/login":
                 d=json.loads(s.body()); us=storage.get("users",{}) or {}; n=d.get("username","").strip()
                 if n not in us or not checkpw(d.get("password",""),us[n]):
@@ -206,7 +221,7 @@ class H(SimpleHTTPRequestHandler):
                 b=b'{"ok":true}'; s.send_response(200); s.send_header("Content-Type","application/json")
                 s.send_header("Set-Cookie",f"tp_session={t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b); return
             if u.path=="/api/business":
-                b=json.loads(s.body()); b.pop("created_by",None)
+                b=json.loads(s.body()); b.pop("created_by",None); b.pop("created_at",None)
                 with LOCK:
                     db=load()
                     if not b.get("id"):   # 所有登入同事都可新增；手動新增不需電話
@@ -233,10 +248,15 @@ class H(SimpleHTTPRequestHandler):
                 with LOCK:
                     db=load(); bz=next(x for x in db["businesses"] if x["id"]==v["business_id"])
                     v["business_name"]=bz["name"]; v["district"]=bz["district"]
-                    if v.get("id"): db["visits"]=[x for x in db["visits"] if x["id"]!=v["id"]]
-                    else: v["id"]=uuid.uuid4().hex[:10]
+                    now=time.strftime("%Y-%m-%d %H:%M")
+                    if v.get("id"):
+                        old=next((x for x in db["visits"] if x["id"]==v["id"]),None)
+                        v["created_at"]=(old or {}).get("created_at") or (old or {}).get("updated") or now
+                        if old and old.get("created_by"): v["created_by_keep"]=old["created_by"]
+                        db["visits"]=[x for x in db["visits"] if x["id"]!=v["id"]]
+                    else: v["id"]=uuid.uuid4().hex[:10]; v["created_at"]=now
                     me=s.user(); v["visitor"]=(str(v.get("visitor") or "").strip() or me) if is_admin(me) else me
-                    v["updated"]=time.strftime("%Y-%m-%d %H:%M"); v["created_by"]=me; db["visits"].append(v)
+                    v["updated"]=now; v["created_by"]=v.pop("created_by_keep",None) or me; db["visits"].append(v)
                     if v.get("status"): bz["status"]=v["status"]
                     save(db)
                 return s.send_json(v)
