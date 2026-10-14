@@ -7,3 +7,4 @@ secret.json
 tunnel_url.txt
 __pycache__/
 *.tmp
+.neon_url
