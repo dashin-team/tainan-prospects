@@ -36,8 +36,8 @@ def is_admin(u): return bool(u) and u in ADMINS
 ADMIN_POST={"/api/refresh","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
-BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note"]
-BH=["ID","名稱","類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註"]
+BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","group5","geo_precision"]
+BH=["ID","名稱","類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註","產業類別","主要產品","工廠登記編號","統一編號","負責人","組織型態","資本額","員工人數","團險5人以上","座標精度"]
 VF=["id","business_id","business_name","district","date","visitor","contact","interest_group","interest_pl","status","next_followup","notes","created_by","updated"]
 VH=["紀錄ID","店家ID","店家名稱","行政區","拜訪日期","拜訪人","聯絡人","團險興趣","產責險興趣","狀態","下次追蹤日","備註","登錄帳號","更新時間"]
 def load():
@@ -81,7 +81,7 @@ def read_sheet(ws,hdr,fields):
                 v=r[m[h]]
                 if isinstance(v,(datetime.date,datetime.datetime)): v=v.strftime("%Y-%m-%d")
                 d[f]="" if v is None else v
-        for f in("interest_group","interest_pl"):
+        for f in("interest_group","interest_pl","group5"):
             if f in d: d[f]= str(d[f]).strip() in("是","True","TRUE","1","Y","y")
         out.append(d)
     return out
@@ -174,7 +174,8 @@ class H(SimpleHTTPRequestHandler):
                     v["business_name"]=bz["name"]; v["district"]=bz["district"]
                     if v.get("id"): db["visits"]=[x for x in db["visits"] if x["id"]!=v["id"]]
                     else: v["id"]=uuid.uuid4().hex[:10]
-                    v["updated"]=time.strftime("%Y-%m-%d %H:%M"); v["created_by"]=s.user(); db["visits"].append(v)
+                    me=s.user(); v["visitor"]=(str(v.get("visitor") or "").strip() or me) if is_admin(me) else me
+                    v["updated"]=time.strftime("%Y-%m-%d %H:%M"); v["created_by"]=me; db["visits"].append(v)
                     if v.get("status"): bz["status"]=v["status"]
                     save(db)
                 return s.send_json(v)

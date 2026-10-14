@@ -8,3 +8,4 @@ tunnel_url.txt
 __pycache__/
 *.tmp
 .neon_url
+factory/*.json
