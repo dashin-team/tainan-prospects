@@ -1,10 +1,10 @@
-"""食品業者登錄（非登不可）來源：下載 FDA 開放資料、篩台南七區、排除連鎖、去重、地理編碼。"""
+"""食品業者登錄（非登不可）來源：下載 FDA 開放資料、篩台南八區、排除連鎖、去重、地理編碼。"""
 import csv,io,json,os,re,random,zipfile,urllib.request,collections,sys
 D=os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0,os.path.join(D,'fda'))
 from exclude import excluded
 from chains import chain
 URL="https://data.fda.gov.tw/data/opendata/export/97/csv"
-DIST=['南區','北區','東區','中西區','安南區','永康區','安定區']
+DIST=['南區','北區','東區','中西區','安南區','永康區','安定區','安平區']
 P=re.compile(r'^\s*(?:\d{3,6})?\s*(?:臺|台)南市\s*('+'|'.join(DIST)+')')
 NONTARGET=re.compile(r'藥局|藥房|眼鏡|通訊|電信')
 def norm(s): return re.sub(r'[\s()（）股份有限公司企業社工廠行號]','',s or '')

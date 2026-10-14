@@ -206,16 +206,28 @@ class H(SimpleHTTPRequestHandler):
                 b=b'{"ok":true}'; s.send_response(200); s.send_header("Content-Type","application/json")
                 s.send_header("Set-Cookie",f"tp_session={t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000{sec}"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b); return
             if u.path=="/api/business":
-                b=json.loads(s.body())
+                b=json.loads(s.body()); b.pop("created_by",None)
                 with LOCK:
                     db=load()
-                    if not b.get("id"):
-                        if not is_admin(me): return s.send_json({"error":"僅管理員可新增店家"},403)
-                        b["id"]="manual-"+uuid.uuid4().hex[:8]; b.setdefault("source","手動新增"); b.setdefault("status","未拜訪"); db["businesses"].append(b)
+                    if not b.get("id"):   # 所有登入同事都可新增；手動新增不需電話
+                        if not str(b.get("name") or "").strip(): return s.send_json({"error":"請填名稱"},400)
+                        b["id"]="manual-"+uuid.uuid4().hex[:8]; b["source"]="同事新增"; b["created_by"]=me; b["created_at"]=time.strftime("%Y-%m-%d %H:%M"); b.setdefault("status","未拜訪"); db["businesses"].append(b)
                     else:
-                        o=next(x for x in db["businesses"] if x["id"]==b["id"]); o.update(b); b=o
+                        o=next((x for x in db["businesses"] if x["id"]==b["id"]),None)
+                        if not o: return s.send_json({"error":"找不到店家"},404)
+                        if not is_admin(me) and o.get("created_by")!=me: return s.send_json({"error":"只能編輯自己新增的店家"},403)
+                        b.pop("source",None); o.update(b); b=o
                     save(db)
                 return s.send_json(b)
+            if u.path=="/api/business/delete":
+                i=json.loads(s.body()).get("id")
+                with LOCK:
+                    db=load(); o=next((x for x in db["businesses"] if x["id"]==i),None)
+                    if not o: return s.send_json({"error":"找不到店家"},404)
+                    if not is_admin(me) and o.get("created_by")!=me: return s.send_json({"error":"只能刪除自己新增的店家"},403)
+                    if any(v.get("business_id")==i for v in db["visits"]): return s.send_json({"error":"此店家已有拜訪紀錄，請先刪除紀錄"},400)
+                    db["businesses"]=[x for x in db["businesses"] if x["id"]!=i]; save(db)
+                return s.send_json({"ok":True})
             if u.path=="/api/visit":
                 v=json.loads(s.body())
                 with LOCK:
@@ -252,7 +264,7 @@ class H(SimpleHTTPRequestHandler):
                             if k in x and x[k] is not None: o[k]=x[k]
                         nu+=1
                     vis={v.get("business_id") for v in db["visits"]}
-                    kept=sorted(dl&vis); rm={i for i in dl if i in idx and i not in vis}
+                    kept=sorted(dl&vis); rm={i for i in dl if i in idx and i not in vis and not idx[i].get("created_by")}   # 同事手動新增的不刪
                     db["businesses"]=[b for b in db["businesses"] if b["id"] not in rm]
                     m=db.setdefault("meta",{}); m["deleted_ids"]=sorted(set(m.get("deleted_ids") or [])|rm)
                     save(db)

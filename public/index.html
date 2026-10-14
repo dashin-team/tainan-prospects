@@ -26,7 +26,7 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 <label style="color:#fff;margin:0"><input type="checkbox" id="ff"> 待追蹤</label>
 <label style="color:#fff;margin:0"><input type="checkbox" id="fx"> 工廠/團險</label>
 <label style="color:#fff;margin:0"><input type="checkbox" id="fl"> 產品責任險</label>
-<button class="adm" style="display:none" onclick="newBiz()">＋新增店家</button>
+<button onclick="newBiz()">＋新增店家</button>
 <button class="adm" style="display:none" onclick="refreshList()">⟳ 更新店家/工廠名單</button>
 <button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=visits'">匯出拜訪紀錄.xlsx</button>
 <button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=businesses'">匯出店家名單.xlsx</button>
@@ -38,7 +38,7 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 <div id="main"><div id="mapwrap"><div id="map"></div><div id="sbox"><input id="sq" placeholder="🔍 搜尋店名、地址、電話、行政區、類別、拜訪人" autocomplete="off"><div id="sres"></div></div></div><div id="side"></div></div>
 <script>
 const ST={"未拜訪":"#9e9e9e","已聯絡":"#1e88e5","有興趣":"#fb8c00","已成交":"#43a047","不需要":"#e53935"};
-const DS=["南區","北區","東區","中西區","安南區","永康區","安定區"];
+const DS=["南區","北區","東區","中西區","安南區","永康區","安定區","安平區"];
 let DB={businesses:[],visits:[],meta:{}},layer,cur=null,online=true;
 const map=L.map('map',{preferCanvas:true}).setView([23.0,120.21],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
@@ -91,7 +91,7 @@ function show(id,fly){cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)retu
  <div>${esc(b.district)}｜${esc(b.category)} ${esc(b.subtype)}</div><div>📍 ${esc(b.address)||'<i>地址未知</i>'}</div>${b.industry?`<div>🏭 ${esc(b.industry)}｜${esc(b.products)}</div><div><small>登記編號 ${esc(b.factory_reg_no)}｜統編 ${esc(b.tax_id)}｜${esc(b.org_type)}｜負責人 ${esc(b.owner)}</small></div>`:''}${b.capital?`<div>💰 資本額 ${Number(b.capital).toLocaleString()} 元</div>`:''}<div>👥 員工人數：${b.employees?esc(b.employees)+' 人'+(g5(b)?' <span class=tag style="background:#2a7">團險5人以上</span>':''):'<i>未知（可於編輯填入）</i>'}</div>${b.geo_precision&&b.geo_precision!=='exact'?`<div><small>⚠️ 座標為${{road:'路段',village:'里',district:'行政區'}[b.geo_precision]||''}概略位置</small></div>`:''}
  <div>📞 ${b.phone?`<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>`:'<i>電話未知</i>'}</div>${b.website?`<div>🌐 <a target=_blank href="${esc(b.website)}">${esc(b.website)}</a></div>`:''}
  <div><a target=_blank style="display:inline-block;background:#1a73e8;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:bold" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name+' '+((b.address||'').replace(/（約略）/g,'')||('台南市'+(b.district||''))))}">📍 Google 地圖查位置</a>｜<small>${esc(b.source)}</small></div>
- <button class="btn g" onclick="editBiz('${id}')">編輯店家資料</button>
+ ${canEdit(b)?`<button class="btn g" onclick="editBiz('${id}')">編輯店家資料</button> <button class="btn g" style="background:#c33" onclick="delBiz('${id}')">刪除店家</button>`:''}${b.created_by?`<div><small>新增者：${esc(vn(b.created_by))}</small></div>`:''}
  <h2 style="margin-top:12px">新增拜訪紀錄</h2>
  <div class=row><div><label>拜訪日期</label><input type=date id=vd value="${today}"></div><div><label>拜訪人</label><input id=vv value="${esc(me)}" ${ADM?'':'readonly style="background:#eee"'}></div></div>
  <label>聯絡人（對方窗口）</label><input id=vc>
@@ -111,12 +111,20 @@ function bizForm(b){const c=map.getCenter();b=b||{lat:c.lat.toFixed(6),lng:c.lng
  <label>行政區</label><select id=b_district>${DS.map(d=>`<option ${d===b.district?'selected':''}>${d}</option>`).join('')}</select>
  <label>類別</label><input id=b_category list=cats value="${esc(b.category)}"><datalist id=cats>${[...new Set(DB.businesses.map(x=>x.category))].map(x=>`<option>${esc(x)}`).join('')}</datalist>
  <div class=row><div><label>緯度</label><input id=b_lat value="${esc(b.lat)}"></div><div><label>經度</label><input id=b_lng value="${esc(b.lng)}"></div></div>
- <small>提示：在地圖上點一下可帶入座標</small><br><button class=btn onclick="saveBiz('${b.id||''}')">儲存</button>`;
- map.once('click',e=>{if($('b_lat')){$('b_lat').value=e.latlng.lat.toFixed(6);$('b_lng').value=e.latlng.lng.toFixed(6)}})}
+ <button class="btn g" onclick="geoAddr()">📍 用地址找座標</button> <small>或直接在地圖上點一下放置位置（可重複點選調整）</small><br><button class=btn onclick="saveBiz('${b.id||''}')">儲存</button>`;
+ setPin(b.lat,b.lng)}
+let PIN=null;function setPin(la,ln){if(PIN){map.removeLayer(PIN);PIN=null}la=parseFloat(la);ln=parseFloat(ln);if(isNaN(la)||isNaN(ln))return;PIN=L.marker([la,ln],{draggable:true}).addTo(map);PIN.on('dragend',()=>{const p=PIN.getLatLng();if($('b_lat')){$('b_lat').value=p.lat.toFixed(6);$('b_lng').value=p.lng.toFixed(6)}})}
+map.on('click',e=>{if($('b_lat')){$('b_lat').value=e.latlng.lat.toFixed(6);$('b_lng').value=e.latlng.lng.toFixed(6);setPin(e.latlng.lat,e.latlng.lng)}});
+async function geoAddr(){const a=$('b_address').value.trim(),d=$('b_district').value;if(!a)return alert('請先填地址');
+ const q=async s=>{const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=tw&q='+encodeURIComponent(s));return (await r.json())[0]};
+ try{const ad=/台南|臺南/.test(a)?a:'臺南市'+(a.includes(d)?'':d)+a;let r=await q(ad)||await q(ad.replace(/\d+(之\d+)?號.*$/,'').replace(/\d+弄.*$/,'').replace(/\d+巷.*$/,''))||await q(d+', 臺南市');
+  if(!r)return alert('找不到這個地址，請直接在地圖上點選位置');$('b_lat').value=(+r.lat).toFixed(6);$('b_lng').value=(+r.lon).toFixed(6);setPin(r.lat,r.lon);map.setView([r.lat,r.lon],17)}catch(e){alert('查詢失敗，請直接在地圖上點選位置')}}
+function canEdit(b){return ADM||(b.created_by&&b.created_by===ME)}
+async function delBiz(id){if(!confirm('確定刪除這家店？'))return;try{await api('/api/business/delete',{id});cur=null;await load()}catch(e){alert(e.message)}}
 function newBiz(){cur='new';bizForm()}function editBiz(id){bizForm(DB.businesses.find(x=>x.id===id))}
 async function saveBiz(id){const b={};['name','address','phone','website','subtype','employees','note','district','category','lat','lng','pl'].forEach(k=>b[k]=$('b_'+k).value.trim());b.employees=b.employees?parseInt(b.employees)||'':'';b.group5=Number(b.employees)>=5;
- if(!b.name)return alert('請填名稱');b.lat=parseFloat(b.lat);b.lng=parseFloat(b.lng);if(id)b.id=id;const r=await api('/api/business',b);await load();show(r.id,1)}
-async function refreshList(){if(!confirm('重新抓取 OpenStreetMap 店家 + 非登不可食品業者登錄（台南七區）？\n只會新增非連鎖的新店家，既有拜訪紀錄與手動資料不會遺失（約需 2–8 分鐘，背景執行）'))return;
+ if(!b.name)return alert('請填名稱');b.lat=parseFloat(b.lat);b.lng=parseFloat(b.lng);if(isNaN(b.lat)||isNaN(b.lng))return alert('請在地圖上點選位置，或按「用地址找座標」');if(id)b.id=id;let r;try{r=await api('/api/business',b)}catch(e){return alert(e.message)}if(PIN){map.removeLayer(PIN);PIN=null}await load();show(r.id,1)}
+async function refreshList(){if(!confirm('重新抓取 OpenStreetMap 店家 + 非登不可食品業者登錄（台南八區）？\n只會新增非連鎖的新店家，既有拜訪紀錄與手動資料不會遺失（約需 2–8 分鐘，背景執行）'))return;
  try{await api('/api/refresh',{})}catch(e){return alert('更新失敗：'+e.message)}
  const tick=async()=>{try{const r=await (await fetch('/api/refresh_status',{cache:'no-store'})).json();if(r.running){$('stats').textContent='名單更新中：'+(r.step||'')+'…';return setTimeout(tick,5000)}
  const x=r.result||{};alert(`更新完成：OSM 新增 ${x.osm_added??'-'} 家、更新 ${x.osm_updated??'-'} 家；非登不可新增 ${x.fda_added??'-'} 家（排除連鎖 ${x.fda_chains_removed??'-'}、重複 ${x.fda_duplicates??'-'}）；共 ${x.total} 家`+(x.osm_error?'\nOSM 錯誤：'+x.osm_error:'')+(x.fda_error?'\n非登不可錯誤：'+x.fda_error:''));load()}catch(e){setTimeout(tick,8000)}};tick()}

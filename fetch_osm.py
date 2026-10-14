@@ -1,8 +1,8 @@
-"""從 OpenStreetMap Overpass 抓取台南七區店家/工廠，輸出 businesses 清單。"""
+"""從 OpenStreetMap Overpass 抓取台南八區店家/工廠，輸出 businesses 清單。"""
 import json, urllib.request, urllib.parse
 SERVERS=["https://overpass.openstreetmap.fr/api/interpreter","https://overpass-api.de/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
 BBOX="22.93,120.05,23.13,120.34"
-DISTS="南區|北區|東區|中西區|安南區|永康區|安定區"
+DISTS="南區|北區|東區|中西區|安南區|永康區|安定區|安平區"
 Q_POI=f'[out:json][timeout:170][bbox:{BBOX}];(nwr["name"][~"^(shop|craft|industrial|amenity|office)$"~"."];nwr["name"]["man_made"="works"];nwr["name"]["landuse"="industrial"];nwr["name"]["building"~"^(industrial|factory|warehouse)$"];);out center tags;'
 Q_BND=f'[out:json][timeout:120][bbox:{BBOX}];rel["boundary"="administrative"]["admin_level"="7"]["name"~"^({DISTS})$"];out geom;'
 FOOD_AMEN={"restaurant","cafe","fast_food","bar","pub","food_court","ice_cream","biergarten"}
