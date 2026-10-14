@@ -1,5 +1,5 @@
 """台南團險/產責險開發追蹤系統 後端（Python 標準函式庫 + openpyxl）。資料存在 data.json，多人共用。"""
-import json, os, io, threading, time, uuid, datetime
+import gzip, json, os, io, threading, time, uuid, datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import openpyxl, hashlib, secrets, hmac
@@ -87,9 +87,13 @@ def read_sheet(ws,hdr,fields):
     return out
 class H(SimpleHTTPRequestHandler):
     def __init__(s,*a,**k): super().__init__(*a,directory=os.path.join(D,"public"),**k)
+    def send_bytes(s,b,ctype,code=200):
+        s.send_response(code); s.send_header("Content-Type",ctype); s.send_header("Cache-Control","no-store"); s.send_header("Vary","Accept-Encoding")
+        if len(b)>1024 and "gzip" in s.headers.get("Accept-Encoding",""):
+            b=gzip.compress(b,6); s.send_header("Content-Encoding","gzip")
+        s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b)
     def send_json(s,o,code=200):
-        b=json.dumps(o,ensure_ascii=False).encode(); s.send_response(code)
-        s.send_header("Content-Type","application/json; charset=utf-8"); s.send_header("Cache-Control","no-store"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b)
+        s.send_bytes(json.dumps(o,ensure_ascii=False,separators=(",",":")).encode(),"application/json; charset=utf-8",code)
     def body(s): return s.rfile.read(int(s.headers.get("Content-Length",0)))
     def user(s):
         for c in s.headers.get("Cookie","").split(";"):
@@ -119,8 +123,13 @@ class H(SimpleHTTPRequestHandler):
         if u.path=="/api/sync":   # 輕量輪詢：只回拜訪紀錄與已變更狀態
             with LOCK:
                 db=load(); return s.send_json({"visits":db["visits"],"status":{b["id"]:b.get("status") for b in db["businesses"] if b.get("status") and b.get("status")!="未拜訪"},"n":len(db["businesses"])})
+        if u.path in("/","/index.html","/login.html"):
+            fp=os.path.join(D,"public","index.html" if u.path=="/" else u.path[1:])
+            with open(fp,"rb") as f: return s.send_bytes(f.read(),"text/html; charset=utf-8")
         if u.path=="/api/data":
-            with LOCK: return s.send_json(load())
+            with LOCK: db=load()
+            # 精簡：去掉空值欄位（前端皆以 ||'' 處理）
+            return s.send_json({**db,"businesses":[{k:v for k,v in b.items() if v not in (None,"")} for b in db["businesses"]]})
         if u.path=="/api/export.xlsx":
             with LOCK: db=load()
             t=q.get("type",["all"])[0]; sh=[]

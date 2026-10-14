@@ -45,9 +45,17 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,att
 const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML=Object.entries(ST).map(([k,c])=>`<span class=dot style="background:${c}"></span>${k}`).join('<br>');return d};lg.addTo(map);
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(p,b){const r=await fetch(p,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},body:typeof b==='string'||b instanceof Blob?b:JSON.stringify(b)});if(r.status===401){location='/login.html';throw Error('未登入')}const j=await r.json();if(j.error)throw Error(j.error);return j}
-async function load(){try{DB=await api('/api/data');online=true;localStorage.setItem('tp_db',JSON.stringify(DB))}catch(e){online=false;DB=JSON.parse(localStorage.getItem('tp_db')||'{"businesses":[],"visits":[],"meta":{}}');alert('無法連線伺服器，顯示本機快取資料（唯讀）')}
+function saveCache(){try{const t=JSON.stringify(DB);if(t.length>1500000){localStorage.removeItem('tp_db');return}localStorage.setItem('tp_db',t)}catch(e){try{localStorage.removeItem('tp_db')}catch(_){}}}
+function readCache(){try{return JSON.parse(localStorage.getItem('tp_db')||'null')}catch(e){return null}}
+function loadMsg(t){let m=$('loadmsg');if(!m){m=document.createElement('div');m.id='loadmsg';m.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:14px 20px;border-radius:8px;box-shadow:0 2px 12px #0005;z-index:9999;font-size:15px';document.body.appendChild(m)}m.textContent=t;m.style.display=t?'':'none'}
+async function fetchData(ms){const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),ms);try{const r=await fetch('/api/data',{cache:'no-store',signal:ac.signal});if(r.status===401){location='/login.html';throw Error('未登入')}if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(!j||!Array.isArray(j.businesses))throw Error('資料格式錯誤');return j}finally{clearTimeout(tm)}}
+async function load(){const first=!DB||!DB.businesses||!DB.businesses.length;if(first)loadMsg('載入資料中…');let err;
+ for(const [i,ms] of [[0,30000],[1,90000],[2,90000]]){try{DB=await fetchData(ms);online=true;err=null;break}catch(e){err=e;if(String(e.message)==='未登入')return;if(i<2){loadMsg('伺服器喚醒中，請稍候（約 30–60 秒）…');await new Promise(r=>setTimeout(r,3000))}}}
+ loadMsg('');
+ if(err){online=false;const c=readCache();DB=c&&Array.isArray(c.businesses)?c:{businesses:[],visits:[],meta:{}};alert(c?'無法連線伺服器，顯示本機快取資料（唯讀）':'無法連線伺服器，請檢查網路後重新整理');}
+ else saveCache()
  fill();draw();}
-function refresh(){const c=cur;draw();cur=c;try{localStorage.setItem('tp_db',JSON.stringify(DB))}catch(e){}}
+function refresh(){const c=cur;draw();cur=c;saveCache()}
 async function sync(){if(document.hidden)return;try{const r=await fetch('/api/sync',{cache:'no-store'});if(!r.ok)return;const j=await r.json();if(j.n!==DB.businesses.length)return load();const before=JSON.stringify(DB.visits.map(v=>v.id+v.updated));DB.visits=j.visits;let ch=JSON.stringify(DB.visits.map(v=>v.id+v.updated))!==before;DB.businesses.forEach(b=>{const s=j.status[b.id]||'未拜訪';if((b.status||'未拜訪')!==s){b.status=s;ch=true}});if(ch&&!($('side').querySelector('#vt')&&document.activeElement&&document.activeElement.closest('#side'))){const c=cur;refresh();if(c&&c!=='new')show(c)}}catch(e){}}
 setInterval(sync,60000);
 function fill(){const opt=(el,arr)=>{const v=el.value;el.length=1;arr.forEach(x=>el.add(new Option(x,x)));el.value=v};
