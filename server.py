@@ -33,7 +33,7 @@ def bootstrap_users():
     storage.put("users",us); return us
 ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}
 def is_admin(u): return bool(u) and u in ADMINS
-ADMIN_POST={"/api/refresh","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset"}
+ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
 BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
@@ -48,7 +48,7 @@ def load():
         db={"businesses":seed,"visits":[],"meta":{"last_refresh":"初始資料 2026-10-13"}}; save(db)
     return db
 def save(db): storage.put("db",db)
-def merge_businesses(db,new):
+def merge_businesses(db,new,strict=False):
     idx={b["id"]:b for b in db["businesses"]}; added=updated=0
     for n in new:
         if n["id"] in idx:
@@ -58,9 +58,12 @@ def merge_businesses(db,new):
             for k in ("address","phone","website"):   # 不覆蓋使用者手動填的
                 if n.get(k) and not o.get(k): o[k]=n[k]
             updated+=1
+        elif strict and n["id"] in blocked(db) or strict and not str(n.get("phone") or "").strip():
+            continue   # 已刪除或無電話的新店家不加入
         else:
             n["status"]="未拜訪"; db["businesses"].append(n); added+=1
     return added,updated
+def blocked(db): return set(db.setdefault("meta",{}).get("deleted_ids") or [])
 REFRESH={}
 def do_refresh():
     """背景更新：OpenStreetMap + 非登不可（只新增非連鎖新店家，既有資料與拜訪紀錄不動）。"""
@@ -70,7 +73,7 @@ def do_refresh():
         import fetch_osm
         new=fetch_osm.fetch()
         with LOCK:
-            db=load(); a,up=merge_businesses(db,new); save(db)
+            db=load(); a,up=merge_businesses(db,new,strict=True); save(db)
         res["osm_added"]=a; res["osm_updated"]=up
     except Exception as e: res["osm_error"]=str(e)[:200]
     try:
@@ -79,7 +82,7 @@ def do_refresh():
         with LOCK: snap=list(load()["businesses"])
         new,rm,dup=fda_source.fetch(snap,max_new_geo=300,log=lambda *a:REFRESH.update(step="地理編碼 %s/%s"%a[1:3]))
         with LOCK:
-            db=load(); ids={b["id"] for b in db["businesses"]}; add=[b for b in new if b["id"] not in ids]
+            db=load(); ids={b["id"] for b in db["businesses"]}; bl=blocked(db); add=[b for b in new if b["id"] not in ids and b["id"] not in bl and str(b.get("phone") or "").strip()]
             db["businesses"]+=add; save(db)
         res["fda_added"]=len(add); res["fda_chains_removed"]=sum(rm.values()); res["fda_duplicates"]=dup
     except Exception as e: res["fda_error"]=str(e)[:200]
@@ -238,6 +241,22 @@ class H(SimpleHTTPRequestHandler):
                             bz["status"]=st=(rest[-1].get("status") if rest else None) or "未拜訪"
                     save(db)
                 return s.send_json({"ok":True,"business_status":st})
+            if u.path=="/api/admin/bulk":   # 批次：更新電話/備註、刪除店家（有拜訪紀錄者不刪），單次寫入
+                d=json.loads(s.body()); up=d.get("updates") or []; dl=set(d.get("delete") or [])
+                with LOCK:
+                    db=load(); idx={b["id"]:b for b in db["businesses"]}; nu=0
+                    for x in up:
+                        o=idx.get(x.get("id"))
+                        if not o: continue
+                        for k in ("phone","note"):
+                            if k in x and x[k] is not None: o[k]=x[k]
+                        nu+=1
+                    vis={v.get("business_id") for v in db["visits"]}
+                    kept=sorted(dl&vis); rm={i for i in dl if i in idx and i not in vis}
+                    db["businesses"]=[b for b in db["businesses"] if b["id"] not in rm]
+                    m=db.setdefault("meta",{}); m["deleted_ids"]=sorted(set(m.get("deleted_ids") or [])|rm)
+                    save(db)
+                return s.send_json({"ok":True,"updated":nu,"deleted":len(rm),"kept_with_visits":kept,"total":len(db["businesses"])})
             if u.path=="/api/refresh":
                 if REFRESH.get("running"): return s.send_json({"started":False,"status":REFRESH})
                 REFRESH.clear(); REFRESH.update(running=True,step="開始",started=time.strftime("%H:%M:%S"))
