@@ -9,6 +9,7 @@ URL=_m[0] if _m else ""
 if _raw and not URL: print("警告：DATABASE_URL 不是 postgresql:// 連線字串，改用本機檔案", file=sys.stderr)
 FILES={"db":"data.json","users":"users.json"}
 _cache={}; _lock=threading.Lock()
+NOCACHE={"users"}   # 帳號每次都重讀，CLI 改帳號不必重啟
 def _conn():
     import pg8000.native
     u=urlparse(URL)
@@ -37,7 +38,7 @@ if URL:
 def backend(): return ("postgres-http" if HTTP else "postgres") if URL else "file"
 def get(k,default=None):
     with _lock:
-        if k in _cache: return json.loads(_cache[k])
+        if k in _cache and k not in NOCACHE: return json.loads(_cache[k])
         if URL:
             r=_q("SELECT v FROM kv WHERE k=$1",(k,)); raw=r[0][0] if r else None
         else:

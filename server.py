@@ -31,6 +31,9 @@ def bootstrap_users():
         n,_,pw=pair.partition(":")
         if n.strip() and pw and n.strip() not in us: us[n.strip()]=hashpw(pw)
     storage.put("users",us); return us
+ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}
+def is_admin(u): return bool(u) and u in ADMINS
+ADMIN_POST={"/api/refresh","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
 BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note"]
@@ -105,7 +108,11 @@ class H(SimpleHTTPRequestHandler):
     def do_GET(s):
         if s.guard(): return
         u=urlparse(s.path); q=parse_qs(u.query)
-        if u.path=="/api/me": return s.send_json({"user":s.user()})
+        if u.path=="/api/me": return s.send_json({"user":s.user(),"is_admin":is_admin(s.user())})
+        if u.path in("/api/export.xlsx","/api/users") and not is_admin(s.user()): return s.send_json({"error":"僅管理員可使用"},403)
+        if u.path=="/api/users":
+            us=storage.get("users",{}) or {}
+            return s.send_json({"users":[{"name":n,"is_admin":is_admin(n)} for n in us]})
         if u.path=="/api/logout":
             s.send_response(302); s.send_header("Set-Cookie","tp_session=; Max-Age=0; Path=/"); s.send_header("Location","/login.html"); s.end_headers(); return
         if u.path=="/healthz": return s.send_json({"ok":True,"storage":storage.backend()})
@@ -122,8 +129,25 @@ class H(SimpleHTTPRequestHandler):
         return super().do_GET()
     def do_POST(s):
         if s.guard(): return
-        u=urlparse(s.path)
+        u=urlparse(s.path); me=s.user()
+        if u.path in ADMIN_POST and not is_admin(me): return s.send_json({"error":"僅管理員可使用"},403)
         try:
+            if u.path in("/api/users/add","/api/users/delete","/api/users/reset"):
+                n=str(json.loads(s.body()).get("name","")).strip()
+                if not n or len(n)>40: return s.send_json({"error":"請輸入名稱"},400)
+                with LOCK:
+                    us=storage.get("users",{}) or {}
+                    if u.path.endswith("add"):
+                        if n in us: return s.send_json({"error":"帳號已存在"},400)
+                        us[n]=hashpw(os.environ.get("DEFAULT_PASSWORD","1234"))
+                    else:
+                        if n not in us: return s.send_json({"error":"帳號不存在"},404)
+                        if u.path.endswith("delete"):
+                            if n==me: return s.send_json({"error":"不能刪除自己"},400)
+                            del us[n]
+                        else: us[n]=hashpw(os.environ.get("DEFAULT_PASSWORD","1234"))
+                    storage.put("users",us)
+                return s.send_json({"ok":True})
             if u.path=="/api/login":
                 d=json.loads(s.body()); us=storage.get("users",{}) or {}; n=d.get("username","").strip()
                 if n not in us or not checkpw(d.get("password",""),us[n]):
@@ -136,7 +160,9 @@ class H(SimpleHTTPRequestHandler):
                 b=json.loads(s.body())
                 with LOCK:
                     db=load()
-                    if not b.get("id"): b["id"]="manual-"+uuid.uuid4().hex[:8]; b.setdefault("source","手動新增"); b.setdefault("status","未拜訪"); db["businesses"].append(b)
+                    if not b.get("id"):
+                        if not is_admin(me): return s.send_json({"error":"僅管理員可新增店家"},403)
+                        b["id"]="manual-"+uuid.uuid4().hex[:8]; b.setdefault("source","手動新增"); b.setdefault("status","未拜訪"); db["businesses"].append(b)
                     else:
                         o=next(x for x in db["businesses"] if x["id"]==b["id"]); o.update(b); b=o
                     save(db)
@@ -154,7 +180,10 @@ class H(SimpleHTTPRequestHandler):
                 return s.send_json(v)
             if u.path=="/api/visit/delete":
                 i=json.loads(s.body())["id"]
-                with LOCK: db=load(); db["visits"]=[x for x in db["visits"] if x["id"]!=i]; save(db)
+                with LOCK:
+                    db=load(); x=next((x for x in db["visits"] if x["id"]==i),None)
+                    if x and not is_admin(me) and x.get("created_by")!=me: return s.send_json({"error":"只能刪除自己登錄的紀錄"},403)
+                    db["visits"]=[x for x in db["visits"] if x["id"]!=i]; save(db)
                 return s.send_json({"ok":True})
             if u.path=="/api/refresh":
                 import fetch_osm

@@ -23,13 +23,14 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 <input id="q" placeholder="搜尋名稱/地址/電話" size="14">
 <label style="color:#fff;margin:0"><input type="checkbox" id="fp"> 只看有電話</label>
 <label style="color:#fff;margin:0"><input type="checkbox" id="ff"> 待追蹤</label>
-<button onclick="newBiz()">＋新增店家</button>
-<button onclick="refreshList()">⟳ 更新店家/工廠名單</button>
-<button onclick="location='/api/export.xlsx?type=visits'">匯出拜訪紀錄.xlsx</button>
-<button onclick="location='/api/export.xlsx?type=businesses'">匯出店家名單.xlsx</button>
-<button onclick="location='/api/export.xlsx?type=all'">匯出全部.xlsx</button>
-<button onclick="imp.click()">匯入 xlsx/json</button><input type="file" id="imp" accept=".xlsx,.json" hidden>
-<button onclick="exportJSON()">備份 JSON</button>
+<button class="adm" style="display:none" onclick="newBiz()">＋新增店家</button>
+<button class="adm" style="display:none" onclick="refreshList()">⟳ 更新店家/工廠名單</button>
+<button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=visits'">匯出拜訪紀錄.xlsx</button>
+<button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=businesses'">匯出店家名單.xlsx</button>
+<button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=all'">匯出全部.xlsx</button>
+<button class="adm" style="display:none" onclick="imp.click()">匯入 xlsx/json</button><input type="file" id="imp" accept=".xlsx,.json" hidden>
+<button class="adm" style="display:none" onclick="exportJSON()">備份 JSON</button>
+<button class="adm" style="display:none" onclick="usersPanel()">👥 帳號管理</button>
 <span id="stats"></span><span id="me" style="font-size:12px"></span> <a href="/api/logout" style="color:#fff;font-size:12px">登出</a></header>
 <div id="main"><div id="map"></div><div id="side"></div></div>
 <script>
@@ -75,7 +76,7 @@ function show(id,fly){cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)retu
  <label>備註</label><textarea id=vt rows=3></textarea><button class=btn onclick="addVisit('${id}')">儲存紀錄</button>
  <h2 style="margin-top:12px">拜訪歷史（${vs.length}）</h2>${vs.map(v=>`<div class=visit><b>${esc(v.date)}</b> ${esc(v.visitor)} <span class=tag style="background:${ST[v.status]||'#999'}">${esc(v.status)}</span>
  <div>聯絡人：${esc(v.contact)}｜團險：${v.interest_group?'有':'—'}｜產責：${v.interest_pl?'有':'—'}</div><div>下次追蹤：${esc(v.next_followup)||'—'}　<small>登錄：${esc(v.created_by||'')}</small></div><div style="white-space:pre-wrap">${esc(v.notes)}</div>
- <a href="#" onclick="delVisit('${v.id}');return false" style="color:#c00;font-size:12px">刪除</a></div>`).join('')||'<i>尚無紀錄</i>'}`}
+ ${ADM||v.created_by===ME?`<a href="#" onclick="delVisit('${v.id}');return false" style="color:#c00;font-size:12px">刪除</a>`:''}</div>`).join('')||'<i>尚無紀錄</i>'}`}
 async function addVisit(id){const v={business_id:id,date:$('vd').value,visitor:$('vv').value.trim(),contact:$('vc').value,interest_group:$('vg').checked,interest_pl:$('vp').checked,status:$('vs').value,next_followup:$('vn').value,notes:$('vt').value};
  if(!v.visitor)return alert('請填拜訪人');localStorage.setItem('tp_visitor',v.visitor);await api('/api/visit',v);await load();show(id)}
 async function delVisit(i){if(!confirm('確定刪除此紀錄？'))return;await api('/api/visit/delete',{id:i});await load();show(cur)}
@@ -95,6 +96,16 @@ async function refreshList(){if(!confirm('從 OpenStreetMap 重新抓取台南�
 function exportJSON(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));a.download='tainan_backup.json';a.click()}
 $('imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=f.name.endsWith('.json')?await api('/api/import.json',await f.text()):await api('/api/import.xlsx',f);alert('匯入完成：'+JSON.stringify(r))}catch(x){alert('匯入失敗：'+x.message)}e.target.value='';load()};
 ['fd','fc','fs','fp','ff'].forEach(i=>$(i).onchange=()=>{cur=null;draw()});$('q').oninput=()=>{cur=null;draw()};
-fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';$('me').textContent='　👤 '+j.user;if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user)});
+fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';ME=j.user;$('me').textContent='　👤 '+j.user+(j.is_admin?'（管理員）':'');if(j.is_admin){ADM=true;document.querySelectorAll('.adm').forEach(e=>e.style.display='')}if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user)});
+let ADM=false,ME='';
+async function usersPanel(){cur='users';const r=await api('/api/users');
+ $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回</button><h2>帳號管理（${r.users.length}）</h2>
+ <div class=row><input id=nu placeholder="同事名字（即帳號）"><button class=btn onclick="uAct('add',$('nu').value)">新增（密碼 1234）</button></div>
+ ${r.users.map(u=>`<div class=li>${esc(u.name)} ${u.is_admin?'<small>管理員</small>':''}
+  <a href="#" onclick="uAct('reset',${esc(JSON.stringify(u.name))});return false">重設密碼為 1234</a>
+  ${u.is_admin?'':`｜<a href="#" style="color:#c00" onclick="uAct('delete',${esc(JSON.stringify(u.name))});return false">刪除</a>`}</div>`).join('')}`}
+async function uAct(a,n){n=(n||'').trim();if(!n)return alert('請輸入名字');
+ if(a==='delete'&&!confirm('確定刪除帳號「'+n+'」？'))return;if(a==='reset'&&!confirm('把「'+n+'」密碼重設為 1234？'))return;
+ try{await api('/api/users/'+a,{name:n});alert('完成')}catch(e){alert(e.message)}usersPanel()}
 load();
 </script></body></html>
