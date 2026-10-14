@@ -47,6 +47,9 @@ const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c
 async function api(p,b){const r=await fetch(p,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},body:typeof b==='string'||b instanceof Blob?b:JSON.stringify(b)});if(r.status===401){location='/login.html';throw Error('未登入')}const j=await r.json();if(j.error)throw Error(j.error);return j}
 async function load(){try{DB=await api('/api/data');online=true;localStorage.setItem('tp_db',JSON.stringify(DB))}catch(e){online=false;DB=JSON.parse(localStorage.getItem('tp_db')||'{"businesses":[],"visits":[],"meta":{}}');alert('無法連線伺服器，顯示本機快取資料（唯讀）')}
  fill();draw();}
+function refresh(){const c=cur;draw();cur=c;try{localStorage.setItem('tp_db',JSON.stringify(DB))}catch(e){}}
+async function sync(){if(document.hidden)return;try{const r=await fetch('/api/sync',{cache:'no-store'});if(!r.ok)return;const j=await r.json();if(j.n!==DB.businesses.length)return load();const before=JSON.stringify(DB.visits.map(v=>v.id+v.updated));DB.visits=j.visits;let ch=JSON.stringify(DB.visits.map(v=>v.id+v.updated))!==before;DB.businesses.forEach(b=>{const s=j.status[b.id]||'未拜訪';if((b.status||'未拜訪')!==s){b.status=s;ch=true}});if(ch&&!($('side').querySelector('#vt')&&document.activeElement&&document.activeElement.closest('#side'))){const c=cur;refresh();if(c&&c!=='new')show(c)}}catch(e){}}
+setInterval(sync,60000);
 function fill(){const opt=(el,arr)=>{const v=el.value;el.length=1;arr.forEach(x=>el.add(new Option(x,x)));el.value=v};
  opt($('fd'),DS);opt($('fc'),[...new Set(DB.businesses.map(b=>b.category))].sort());opt($('fs'),Object.keys(ST));}
 function lastVisit(id){return DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date))[0]}
@@ -88,8 +91,8 @@ function show(id,fly){cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)retu
  <div>聯絡人：${esc(v.contact)}｜團險：${v.interest_group?'有':'—'}｜產責：${v.interest_pl?'有':'—'}</div><div>下次追蹤：${esc(v.next_followup)||'—'}　<small>登錄：${esc(v.created_by||'')}</small></div><div style="white-space:pre-wrap">${esc(v.notes)}</div>
  ${ADM||v.created_by===ME?`<a href="#" onclick="delVisit('${v.id}');return false" style="color:#c00;font-size:12px">刪除</a>`:''}</div>`).join('')||'<i>尚無紀錄</i>'}`}
 async function addVisit(id){const v={business_id:id,date:$('vd').value,visitor:ADM?$('vv').value.trim():ME,contact:$('vc').value,interest_group:$('vg').checked,interest_pl:$('vp').checked,status:$('vs').value,next_followup:$('vn').value,notes:$('vt').value};
- if(!v.visitor)return alert('請填拜訪人');await api('/api/visit',v);await load();show(id)}
-async function delVisit(i){if(!confirm('確定刪除此紀錄？'))return;await api('/api/visit/delete',{id:i});await load();show(cur)}
+ if(!v.visitor)return alert('請填拜訪人');const r=await api('/api/visit',v);DB.visits=DB.visits.filter(x=>x.id!==r.id);DB.visits.push(r);const bz=DB.businesses.find(x=>x.id===id);if(bz&&r.status)bz.status=r.status;refresh();show(id)}
+async function delVisit(i){if(!confirm('確定刪除此紀錄？'))return;const vv=DB.visits.find(x=>x.id===i);const r=await api('/api/visit/delete',{id:i});DB.visits=DB.visits.filter(x=>x.id!==i);const bz=vv&&DB.businesses.find(x=>x.id===vv.business_id);if(bz&&r.business_status)bz.status=r.business_status;refresh();show(cur)}
 function bizForm(b){const c=map.getCenter();b=b||{lat:c.lat.toFixed(6),lng:c.lng.toFixed(6),district:$('fd').value||'東區',category:'工廠/製造'};
  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回</button><h2>${b.id?'編輯':'新增'}店家/工廠</h2>
  ${[['name','名稱'],['address','地址'],['phone','電話'],['website','網站'],['subtype','細類'],['employees','員工人數'],['note','備註']].map(([k,l])=>`<label>${l}</label><input id=b_${k} value="${esc(b[k])}">`).join('')}

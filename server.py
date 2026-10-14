@@ -89,7 +89,7 @@ class H(SimpleHTTPRequestHandler):
     def __init__(s,*a,**k): super().__init__(*a,directory=os.path.join(D,"public"),**k)
     def send_json(s,o,code=200):
         b=json.dumps(o,ensure_ascii=False).encode(); s.send_response(code)
-        s.send_header("Content-Type","application/json; charset=utf-8"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b)
+        s.send_header("Content-Type","application/json; charset=utf-8"); s.send_header("Cache-Control","no-store"); s.send_header("Content-Length",len(b)); s.end_headers(); s.wfile.write(b)
     def body(s): return s.rfile.read(int(s.headers.get("Content-Length",0)))
     def user(s):
         for c in s.headers.get("Cookie","").split(";"):
@@ -116,6 +116,9 @@ class H(SimpleHTTPRequestHandler):
         if u.path=="/api/logout":
             s.send_response(302); s.send_header("Set-Cookie","tp_session=; Max-Age=0; Path=/"); s.send_header("Location","/login.html"); s.end_headers(); return
         if u.path=="/healthz": return s.send_json({"ok":True,"storage":storage.backend()})
+        if u.path=="/api/sync":   # 輕量輪詢：只回拜訪紀錄與已變更狀態
+            with LOCK:
+                db=load(); return s.send_json({"visits":db["visits"],"status":{b["id"]:b.get("status") for b in db["businesses"] if b.get("status") and b.get("status")!="未拜訪"},"n":len(db["businesses"])})
         if u.path=="/api/data":
             with LOCK: return s.send_json(load())
         if u.path=="/api/export.xlsx":
@@ -184,8 +187,14 @@ class H(SimpleHTTPRequestHandler):
                 with LOCK:
                     db=load(); x=next((x for x in db["visits"] if x["id"]==i),None)
                     if x and not is_admin(me) and x.get("created_by")!=me: return s.send_json({"error":"只能刪除自己登錄的紀錄"},403)
-                    db["visits"]=[x for x in db["visits"] if x["id"]!=i]; save(db)
-                return s.send_json({"ok":True})
+                    db["visits"]=[x for x in db["visits"] if x["id"]!=i]; st=None
+                    if x:
+                        bz=next((b for b in db["businesses"] if b["id"]==x.get("business_id")),None)
+                        if bz:
+                            rest=sorted([v for v in db["visits"] if v.get("business_id")==bz["id"]],key=lambda v:(str(v.get("date","")),str(v.get("updated",""))))
+                            bz["status"]=st=(rest[-1].get("status") if rest else None) or "未拜訪"
+                    save(db)
+                return s.send_json({"ok":True,"business_status":st})
             if u.path=="/api/refresh":
                 import fetch_osm
                 new=fetch_osm.fetch()
