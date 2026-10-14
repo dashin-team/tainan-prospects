@@ -3,7 +3,7 @@ services:
     name: tainan-prospects
     runtime: python
     plan: free
-    region: singapore
+    region: ohio
     buildCommand: pip install -r requirements.txt
     startCommand: python3 server.py
     healthCheckPath: /healthz

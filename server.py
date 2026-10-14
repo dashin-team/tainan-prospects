@@ -201,8 +201,16 @@ if __name__=="__main__":
     if len(sys.argv)>2 and sys.argv[1]=="adduser":
         us=storage.get("users",{}) or {}; pw=sys.argv[3] if len(sys.argv)>3 else secrets.token_urlsafe(12)
         us[sys.argv[2]]=hashpw(pw); storage.put("users",us); print(sys.argv[2],pw,"(",storage.backend(),")"); sys.exit()
+    if len(sys.argv)>2 and sys.argv[1]=="addusers":   # 一次新增多位同事，預設密碼 1234：python3 server.py addusers 小明 小華
+        us=storage.get("users",{}) or {}; pw=os.environ.get("DEFAULT_PASSWORD","1234")
+        for n in sys.argv[2:]: us[n]=hashpw(pw); print(n,pw)
+        storage.put("users",us); print("(",storage.backend(),")"); sys.exit()
+    if len(sys.argv)>1 and sys.argv[1]=="listusers":
+        print("\n".join(storage.get("users",{}) or {})); sys.exit()
     if len(sys.argv)>1 and sys.argv[1]=="import-json":   # 把本機 data.json 上傳到雲端資料庫
-        storage.put("db",json.load(open(sys.argv[2]))); print("imported to",storage.backend()); sys.exit()
+        storage.put("db",json.load(open(sys.argv[2])))
+        if len(sys.argv)>3: storage.put("users",json.load(open(sys.argv[3])))   # 可一併搬帳號：import-json data.json users.json
+        print("imported to",storage.backend()); sys.exit()
     bootstrap_users()
     p=int(os.environ.get("PORT",8080)); print("http://0.0.0.0:%d"%p)
     ThreadingHTTPServer(("0.0.0.0",p),H).serve_forever()

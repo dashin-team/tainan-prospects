@@ -2,7 +2,11 @@
 import os, json, threading, ssl
 from urllib.parse import urlparse, unquote
 D=os.path.dirname(os.path.abspath(__file__))
-URL=os.environ.get("DATABASE_URL","")
+import re, sys
+_raw=os.environ.get("DATABASE_URL","")
+_m=re.findall(r"postgres(?:ql)?://[^\s'\"]+",_raw)   # 容許前後有 psql、引號、空白
+URL=_m[0] if _m else ""
+if _raw and not URL: print("警告：DATABASE_URL 不是 postgresql:// 連線字串，改用本機檔案", file=sys.stderr)
 FILES={"db":"data.json","users":"users.json"}
 _cache={}; _lock=threading.Lock()
 def _conn():
