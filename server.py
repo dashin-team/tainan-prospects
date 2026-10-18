@@ -66,7 +66,7 @@ def merge_businesses(db,new,strict=False):
 def blocked(db): return set(db.setdefault("meta",{}).get("deleted_ids") or [])
 REFRESH={}
 def do_refresh():
-    """背景更新：OpenStreetMap + 非登不可（只新增非連鎖新店家，既有資料與拜訪紀錄不動）。"""
+    """背景更新：OpenStreetMap（只新增有電話的非連鎖新店家，既有資料與拜訪紀錄不動）。"""
     res={}
     try:
         REFRESH["step"]="抓取 OpenStreetMap"
@@ -76,16 +76,7 @@ def do_refresh():
             db=load(); a,up=merge_businesses(db,new,strict=True); save(db)
         res["osm_added"]=a; res["osm_updated"]=up
     except Exception as e: res["osm_error"]=str(e)[:200]
-    try:
-        REFRESH["step"]="下載非登不可食品業者登錄（約 1–3 分鐘）"
-        import fda_source
-        with LOCK: snap=list(load()["businesses"])
-        new,rm,dup=fda_source.fetch(snap,max_new_geo=300,log=lambda *a:REFRESH.update(step="地理編碼 %s/%s"%a[1:3]))
-        with LOCK:
-            db=load(); ids={b["id"] for b in db["businesses"]}; bl=blocked(db); add=[b for b in new if b["id"] not in ids and b["id"] not in bl and str(b.get("phone") or "").strip()]
-            db["businesses"]+=add; save(db)
-        res["fda_added"]=len(add); res["fda_chains_removed"]=sum(rm.values()); res["fda_duplicates"]=dup
-    except Exception as e: res["fda_error"]=str(e)[:200]
+    # 非登不可（FDA）步驟已移除：資料無電話且會被過濾，且下載/地理編碼在 Render 免費方案會造成記憶體不足而重啟。
     with LOCK:
         db=load(); db["meta"]["last_refresh"]=time.strftime("%Y-%m-%d %H:%M"); save(db); res["total"]=len(db["businesses"])
     REFRESH.update(running=False,step="完成",result=res)
