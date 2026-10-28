@@ -273,6 +273,11 @@ class H(SimpleHTTPRequestHandler):
                         if not o: continue
                         for k in ("phone","note"):
                             if k in x and x[k] is not None: o[k]=x[k]
+                        if x.get("lat") is not None and x.get("lng") is not None:
+                            try:
+                                la,ln=float(x["lat"]),float(x["lng"])
+                                if 22.8<la<23.5 and 119.9<ln<120.7: o["lat"],o["lng"]=la,ln; o["geo_precision"]=x.get("geo_precision") or "google"
+                            except Exception: pass
                         nu+=1
                     vis={v.get("business_id") for v in db["visits"]}
                     kept=sorted(dl&vis); rm={i for i in dl if i in idx and i not in vis and not idx[i].get("created_by")}   # 同事手動新增的不刪
