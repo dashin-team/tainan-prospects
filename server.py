@@ -33,7 +33,7 @@ def bootstrap_users():
     storage.put("users",us); return us
 ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}
 def is_admin(u): return bool(u) and u in ADMINS
-ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all"}
+ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
 BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
@@ -48,32 +48,94 @@ def load():
         db={"businesses":seed,"visits":[],"meta":{"last_refresh":"初始資料 2026-10-13"}}; save(db)
     return db
 def save(db): storage.put("db",db)
-def merge_businesses(db,new,strict=False):
+TEXT_KEEP=("name","category","subtype","district","address","phone","website","note")
+def coords_locked(o):
+    """已對齊地標或同事手動搬過的點，一般 OSM 更新不得再移動。"""
+    return bool(o.get("geo_locked")) or o.get("geo_precision") in ("google","manual")
+def in_tainan(la,ln):
+    return 22.8<la<23.5 and 119.9<ln<120.7
+def lock_text_fields(o, keys):
+    cur=list(o.get("locked_fields") or [])
+    for k in keys:
+        if k in TEXT_KEEP and k not in cur: cur.append(k)
+    if cur: o["locked_fields"]=cur
+def apply_business_edit(o, b):
+    """同事編輯：文字欄鎖定，避免之後的 OSM 更新蓋掉。只有座標真的移動時才改標成 manual。"""
+    b=dict(b); b.pop("source",None)
+    for k in ("geo_locked","geo_precision","geo_updated","locked_fields","created_by","created_at"): b.pop(k,None)
+    lock_text_fields(o,[k for k in TEXT_KEEP if k in b])
+    try:
+        la,ln=float(b.get("lat")),float(b.get("lng"))
+        moved=in_tainan(la,ln) and (o.get("lat")!=la or o.get("lng")!=ln)
+    except (TypeError,ValueError): moved=False
+    o.update(b)
+    if moved:
+        o["lat"],o["lng"]=la,ln; o["geo_locked"]=True; o["geo_precision"]="manual"
+    return o
+def _blank(v):
+    return v is None or (isinstance(v,str) and not v.strip())
+def merge_businesses(db,new,strict=False,preserve=False):
+    """preserve=True 用於每週 OSM 更新：不覆蓋已有文字、不移動已鎖定座標、不刪除。
+    osm 的 updated 只計實際寫入有差異的筆數。匯入維持舊的覆寫行為。"""
     idx={b["id"]:b for b in db["businesses"]}; added=updated=0
     for n in new:
         if n["id"] in idx:
             o=idx[n["id"]]
-            for k in ("name","category","subtype","district","lat","lng","source"):
-                o[k]=n[k]
-            for k in ("address","phone","website"):   # 不覆蓋使用者手動填的
-                if n.get(k) and not o.get(k): o[k]=n[k]
-            updated+=1
-        elif strict and n["id"] in blocked(db) or strict and not str(n.get("phone") or "").strip():
+            if preserve:
+                changed=False; locked=set(o.get("locked_fields") or [])
+                for k in TEXT_KEEP:
+                    if k in locked or not _blank(o.get(k)): continue
+                    if not _blank(n.get(k)): o[k]=n[k]; changed=True
+                if _blank(o.get("source")) and not _blank(n.get("source")): o["source"]=n["source"]; changed=True
+                if not coords_locked(o):
+                    for k in ("lat","lng"):
+                        if n.get(k) not in (None,"") and o.get(k)!=n[k]: o[k]=n[k]; changed=True
+                if changed: updated+=1
+            else:
+                for k in ("name","category","subtype","district","lat","lng","source"):
+                    o[k]=n[k]
+                for k in ("address","phone","website"):   # 不覆蓋使用者手動填的
+                    if n.get(k) and not o.get(k): o[k]=n[k]
+                updated+=1
+        elif strict and (n["id"] in blocked(db) or not str(n.get("phone") or "").strip()):
             continue   # 已刪除或無電話的新店家不加入
         else:
             n["status"]="未拜訪"; db["businesses"].append(n); added+=1
     return added,updated
+def apply_coordinates(db, updates):
+    """一次性寫入已確認的同一地標座標。不連線外部地圖、不新增、不刪除、不合併。
+    只改 lat/lng 與非文字的座標來源標記。信心不足或未確認同一家者，該筆完全不動。"""
+    idx={b["id"]:b for b in db["businesses"]}; updated=0; skipped=[]
+    for x in updates or []:
+        i=x.get("id"); o=idx.get(i)
+        if not o: skipped.append({"id":i,"reason":"not_found"}); continue
+        if x.get("confirm_same_place") is not True or x.get("confidence")!="high":
+            skipped.append({"id":i,"reason":"not_high_confidence"}); continue
+        try: la,ln=float(x["lat"]),float(x["lng"])
+        except (KeyError,TypeError,ValueError): skipped.append({"id":i,"reason":"bad_coord"}); continue
+        if not in_tainan(la,ln): skipped.append({"id":i,"reason":"out_of_bounds"}); continue
+        la,ln=round(la,6),round(ln,6)
+        try:
+            same=abs(float(o.get("lat"))-la)<1e-7 and abs(float(o.get("lng"))-ln)<1e-7
+        except (TypeError,ValueError): same=False
+        if same and o.get("geo_locked") and o.get("geo_precision")=="google":
+            skipped.append({"id":i,"reason":"unchanged"}); continue
+        o["lat"],o["lng"]=la,ln
+        o["geo_precision"]="google"; o["geo_locked"]=True; o["geo_updated"]=time.strftime("%Y-%m-%d %H:%M")
+        updated+=1
+    return {"updated":updated,"skipped":skipped,"total":len(db["businesses"])}
 def blocked(db): return set(db.setdefault("meta",{}).get("deleted_ids") or [])
 REFRESH={}
 def do_refresh():
-    """背景更新：OpenStreetMap（只新增有電話的非連鎖新店家，既有資料與拜訪紀錄不動）。"""
+    """背景更新：OpenStreetMap。只新增有電話且未被排除的新店家。
+    不覆蓋已有文字，也不移動已鎖定或已標成 google/manual 的座標。不刪除、不碰拜訪紀錄。不是 Google 同步。"""
     res={}
     try:
         REFRESH["step"]="抓取 OpenStreetMap"
         import fetch_osm
         new=fetch_osm.fetch()
         with LOCK:
-            db=load(); a,up=merge_businesses(db,new,strict=True); save(db)
+            db=load(); a,up=merge_businesses(db,new,strict=True,preserve=True); save(db)
         res["osm_added"]=a; res["osm_updated"]=up
     except Exception as e: res["osm_error"]=str(e)[:200]
     # 非登不可（FDA）步驟已移除：資料無電話且會被過濾，且下載/地理編碼在 Render 免費方案會造成記憶體不足而重啟。
@@ -222,7 +284,7 @@ class H(SimpleHTTPRequestHandler):
                         o=next((x for x in db["businesses"] if x["id"]==b["id"]),None)
                         if not o: return s.send_json({"error":"找不到店家"},404)
                         if not is_admin(me) and o.get("created_by")!=me: return s.send_json({"error":"只能編輯自己新增的店家"},403)
-                        b.pop("source",None); o.update(b); b=o
+                        b=apply_business_edit(o,b)
                     save(db)
                 return s.send_json(b)
             if u.path=="/api/business/delete":
@@ -276,7 +338,7 @@ class H(SimpleHTTPRequestHandler):
                         if x.get("lat") is not None and x.get("lng") is not None:
                             try:
                                 la,ln=float(x["lat"]),float(x["lng"])
-                                if 22.8<la<23.5 and 119.9<ln<120.7: o["lat"],o["lng"]=la,ln; o["geo_precision"]=x.get("geo_precision") or "google"
+                                if in_tainan(la,ln): o["lat"],o["lng"]=la,ln; o["geo_precision"]=x.get("geo_precision") or "google"; o["geo_locked"]=True
                             except Exception: pass
                         nu+=1
                     vis={v.get("business_id") for v in db["visits"]}
@@ -285,6 +347,12 @@ class H(SimpleHTTPRequestHandler):
                     m=db.setdefault("meta",{}); m["deleted_ids"]=sorted(set(m.get("deleted_ids") or [])|rm)
                     save(db)
                 return s.send_json({"ok":True,"updated":nu,"deleted":len(rm),"kept_with_visits":kept,"total":len(db["businesses"])})
+            if u.path=="/api/admin/coordinates":   # 一次性座標對齊；呼叫端須自備已確認的同一地標，本服務不查 Google
+                d=json.loads(s.body())
+                with LOCK:
+                    db=load(); res=apply_coordinates(db,d.get("updates") or [])
+                    if res["updated"]: save(db)
+                return s.send_json({"ok":True,**res})
             if u.path=="/api/refresh":
                 if REFRESH.get("running"): return s.send_json({"started":False,"status":REFRESH})
                 REFRESH.clear(); REFRESH.update(running=True,step="開始",started=time.strftime("%H:%M:%S"))
