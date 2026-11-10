@@ -1,9 +1,9 @@
 """台南團險/產責險開發追蹤系統 後端（Python 標準函式庫 + openpyxl）。資料存在 data.json，多人共用。"""
 import re, gzip, json, os, io, threading, time, uuid, datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 import openpyxl, hashlib, secrets, hmac
-import storage
+import storage, maplink
 def _j(p,d):
     try: return json.load(open(p))
     except Exception: return d
@@ -33,7 +33,7 @@ def bootstrap_users():
     storage.put("users",us); return us
 ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}
 def is_admin(u): return bool(u) and u in ADMINS
-ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all"}
+ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/admin/location/revert","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
 BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
@@ -124,6 +124,57 @@ def apply_coordinates(db, updates):
         o["geo_precision"]="google"; o["geo_locked"]=True; o["geo_updated"]=time.strftime("%Y-%m-%d %H:%M")
         updated+=1
     return {"updated":updated,"skipped":skipped,"total":len(db["businesses"])}
+LOC_FIELDS=("lat","lng","geo_precision","geo_locked","geo_updated","geo_updated_by")
+def _loc_snapshot(o):
+    return {k:o.get(k) for k in LOC_FIELDS}
+def _remember_location(db, business_id, user, action, old, new):
+    hist=db.setdefault("location_history", [])
+    hist.append({"id":uuid.uuid4().hex[:12],"business_id":business_id,"at":new.get("geo_updated") or time.strftime("%Y-%m-%d %H:%M"),
+                 "by":user or "","action":action,"old":old,"new":new})
+    if len(hist)>1000: del hist[:-1000]
+def _coords_from_body(body, fetch=None):
+    body=body or {}; pasted=str(body.get("input") or body.get("url") or "").strip()
+    has_ll=body.get("lat") not in (None,"") and body.get("lng") not in (None,"")
+    if body.get("preview"):
+        if pasted: return maplink.extract_point(pasted, fetch=fetch)
+        if has_ll:
+            try: return float(body["lat"]), float(body["lng"])
+            except (TypeError,ValueError): raise ValueError("座標格式不正確")
+        raise ValueError("請貼上 Google 地圖連結或座標")
+    if has_ll:
+        try: return float(body["lat"]), float(body["lng"])
+        except (TypeError,ValueError): raise ValueError("座標格式不正確")
+    if pasted: return maplink.extract_point(pasted, fetch=fetch)
+    raise ValueError("請提供座標或 Google 地圖連結")
+def apply_team_location(db, business_id, user, body, fetch=None):
+    """同事修正位置。只寫座標與鎖定標記；預覽不寫入。舊座標記入 location_history。"""
+    la,ln=_coords_from_body(body, fetch=fetch)
+    if not (la==la and ln==ln) or abs(la)==float("inf") or abs(ln)==float("inf") or not in_tainan(la,ln):
+        raise ValueError("座標超出臺南範圍")
+    la,ln=round(float(la),6),round(float(ln),6)
+    o=next((x for x in db.get("businesses") or [] if x.get("id")==business_id), None)
+    if not o: raise LookupError("找不到店家")
+    if body.get("preview"): return {"preview":True,"id":business_id,"lat":la,"lng":ln}
+    old=_loc_snapshot(o); now=time.strftime("%Y-%m-%d %H:%M")
+    for k in LOC_FIELDS: o.setdefault(k, None)
+    o["lat"],o["lng"]=la,ln
+    o["geo_precision"]="manual"; o["geo_locked"]=True; o["geo_updated"]=now; o["geo_updated_by"]=user or ""
+    _remember_location(db, business_id, user, "set", old, _loc_snapshot(o))
+    return {"ok":True,"id":business_id,"lat":la,"lng":ln,"geo_precision":"manual","geo_locked":True,"geo_updated":now,"geo_updated_by":user or ""}
+def revert_team_location(db, business_id, user):
+    """管理員還原上一筆座標。只回復座標欄位。"""
+    hist=db.get("location_history") or []
+    prev=next((h for h in reversed(hist) if h.get("business_id")==business_id and isinstance(h.get("old"), dict)), None)
+    if not prev: raise LookupError("沒有可還原的位置紀錄")
+    o=next((x for x in db.get("businesses") or [] if x.get("id")==business_id), None)
+    if not o: raise LookupError("找不到店家")
+    current=_loc_snapshot(o); now=time.strftime("%Y-%m-%d %H:%M")
+    for k in LOC_FIELDS:
+        if k in prev["old"] and prev["old"][k] not in (None,""): o[k]=prev["old"][k]
+        else: o.pop(k, None)
+    new=_loc_snapshot(o); new["geo_updated"]=o.get("geo_updated") or now
+    _remember_location(db, business_id, user, "revert", current, new)
+    return {"ok":True,"id":business_id,"lat":o.get("lat"),"lng":o.get("lng"),"geo_precision":o.get("geo_precision"),"geo_locked":bool(o.get("geo_locked"))}
 def blocked(db): return set(db.setdefault("meta",{}).get("deleted_ids") or [])
 REFRESH={}
 def do_refresh():
@@ -219,7 +270,8 @@ class H(SimpleHTTPRequestHandler):
         if u.path=="/api/data":
             with LOCK: db=load()
             # 精簡：去掉空值欄位（前端皆以 ||'' 處理）
-            return s.send_json({**db,"businesses":[{k:v for k,v in b.items() if v not in (None,"")} for b in db["businesses"]]})
+            pub={k:v for k,v in db.items() if k!="location_history"}
+            return s.send_json({**pub,"businesses":[{k:v for k,v in b.items() if v not in (None,"")} for b in db["businesses"]]})
         if u.path=="/api/export.xlsx":
             with LOCK: db=load()
             t=q.get("type",["all"])[0]; sh=[]
@@ -353,6 +405,23 @@ class H(SimpleHTTPRequestHandler):
                     db=load(); res=apply_coordinates(db,d.get("updates") or [])
                     if res["updated"]: save(db)
                 return s.send_json({"ok":True,**res})
+            m=re.fullmatch(r"/api/businesses/([^/]+)/location", u.path)
+            if m:
+                bid=unquote(m.group(1)); d=json.loads(s.body() or b"{}")
+                try:
+                    with LOCK:
+                        db=load(); res=apply_team_location(db, bid, me, d)
+                        if not res.get("preview"): save(db)
+                except LookupError as e: return s.send_json({"error":str(e)},404)
+                except ValueError as e: return s.send_json({"error":str(e)},400)
+                return s.send_json(res)
+            if u.path=="/api/admin/location/revert":
+                d=json.loads(s.body() or b"{}")
+                try:
+                    with LOCK:
+                        db=load(); res=revert_team_location(db, d.get("business_id"), me); save(db)
+                except LookupError as e: return s.send_json({"error":str(e)},404)
+                return s.send_json(res)
             if u.path=="/api/refresh":
                 if REFRESH.get("running"): return s.send_json({"started":False,"status":REFRESH})
                 REFRESH.clear(); REFRESH.update(running=True,step="開始",started=time.strftime("%H:%M:%S"))
