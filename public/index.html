@@ -74,9 +74,11 @@ function pick(id){$('sres').innerHTML='';const b=DB.businesses.find(x=>x.id===id
 function filtered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q').value.trim(),today=new Date().toISOString().slice(0,10);
  return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)&&(!$('fx').checked||String(b.category).startsWith('工廠'))&&(!$('fl').checked||isPL(b))
  &&(!q||hay(b).includes(q.toLowerCase()))&&(!$('ff').checked||((lastVisit(b.id)||{}).next_followup||'9')<=today))}
+function gmapsHref(b){const addr=String(b.address||'').replace(/（約略）/g,'').trim();const q=(addr?`${b.name||''} ${addr}`:`${b.name||''} ${b.district||''} 台南`).trim();return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q)}
+function pinPopup(b){return `<b>${esc(b.name)}</b><br>${esc(b.district)}｜${esc(b.category)}<br>${esc(b.address||'')}${b.phone?'<br>📞 '+esc(b.phone):''}<div style="margin-top:6px"><a target="_blank" rel="noopener" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a></div><button type="button" style="margin-top:6px" onclick="event.stopPropagation();startFix('${esc(b.id)}')">修正位置</button>`}
 function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);MK={};const f=filtered();
  f.forEach(b=>{if(b.lat==null||b.lat==='')return;MK[b.id]=L.circleMarker([b.lat,b.lng],{radius:b.status&&b.status!=='未拜訪'?8:5,color:'#333',weight:1,fillColor:ST[b.status||'未拜訪'],fillOpacity:.85})
- .bindTooltip(esc(b.name)).bindPopup(()=>`<b>${esc(b.name)}</b><br>${esc(b.district)}｜${esc(b.category)}<br>${esc(b.address)}${b.phone?'<br>📞 '+esc(b.phone):''}`).on('click',()=>show(b.id)).addTo(layer)});
+ .bindTooltip(esc(b.name)).bindPopup(()=>pinPopup(b)).on('click',()=>show(b.id)).addTo(layer)});
  const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
  $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜產責對象 ${DB.businesses.filter(isPL).length}｜團險有興趣 ${new Set(DB.visits.filter(v=>v.interest_group).map(v=>v.business_id)).size}｜產責有興趣 ${new Set(DB.visits.filter(v=>v.interest_pl).map(v=>v.business_id)).size}｜名單更新：${esc(DB.meta.last_refresh||'')}`;
  if(!cur)listView(f)}
@@ -84,13 +86,15 @@ function listView(f){const today=new Date().toISOString().slice(0,10);
  const fu=DB.visits.filter(v=>v.next_followup).sort((a,b)=>a.next_followup.localeCompare(b.next_followup)).slice(0,30);
  $('side').innerHTML=`<h2>待追蹤（依下次追蹤日）</h2>${fu.map(v=>`<div class=li onclick="show('${v.business_id}')">${v.next_followup<=today?'⚠️':''}${esc(v.next_followup)} ${esc(v.business_name)}｜${esc(vn(v.visitor))}｜${esc(v.status)}</div>`).join('')||'<i>尚無</i>'}
  <h2 style="margin-top:12px">名單（前 200 筆，點選定位）</h2>${f.slice(0,200).map(b=>`<div class=li onclick="show('${b.id}',1)"><span class=dot style="background:${ST[b.status||'未拜訪']}"></span>${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}</small></div>`).join('')}`}
-function show(id,fly){cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(fly&&b.lat)map.setView([b.lat,b.lng],17);
+function show(id,fly){if(FIX&&FIX.id!==id){clearFixMarker();FIX=null}cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(fly&&b.lat)map.setView([b.lat,b.lng],17);
  const vs=DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date));const me=vn(ME||localStorage.getItem('tp_visitor')||''),today=new Date().toISOString().slice(0,10);
  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回清單</button>
  <h2>${esc(b.name)} <span class=tag style="background:${ST[b.status||'未拜訪']}">${esc(b.status||'未拜訪')}</span></h2>
- <div>${esc(b.district)}｜${esc(b.category)} ${esc(b.subtype)}</div><div>📍 ${esc(b.address)||'<i>地址未知</i>'}</div>${b.industry?`<div>🏭 ${esc(b.industry)}｜${esc(b.products)}</div><div><small>登記編號 ${esc(b.factory_reg_no)}｜統編 ${esc(b.tax_id)}｜${esc(b.org_type)}｜負責人 ${esc(b.owner)}</small></div>`:''}${b.capital?`<div>💰 資本額 ${Number(b.capital).toLocaleString()} 元</div>`:''}<div>👥 員工人數：${b.employees?esc(b.employees)+' 人'+(g5(b)?' <span class=tag style="background:#2a7">團險5人以上</span>':''):'<i>未知（可於編輯填入）</i>'}</div>${b.geo_precision&&b.geo_precision!=='exact'?`<div><small>⚠️ 座標為${{road:'路段',village:'里',district:'行政區'}[b.geo_precision]||''}概略位置</small></div>`:''}
+ <div>${esc(b.district)}｜${esc(b.category)} ${esc(b.subtype)}</div><div>📍 ${esc(b.address)||'<i>地址未知</i>'}</div>${b.industry?`<div>🏭 ${esc(b.industry)}｜${esc(b.products)}</div><div><small>登記編號 ${esc(b.factory_reg_no)}｜統編 ${esc(b.tax_id)}｜${esc(b.org_type)}｜負責人 ${esc(b.owner)}</small></div>`:''}${b.capital?`<div>💰 資本額 ${Number(b.capital).toLocaleString()} 元</div>`:''}<div>👥 員工人數：${b.employees?esc(b.employees)+' 人'+(g5(b)?' <span class=tag style="background:#2a7">團險5人以上</span>':''):'<i>未知（可於編輯填入）</i>'}</div>${({road:'路段',village:'里',district:'行政區'})[b.geo_precision]?`<div><small>⚠️ 座標為${({road:'路段',village:'里',district:'行政區'})[b.geo_precision]}概略位置</small></div>`:''}
  <div>📞 ${b.phone?`<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>`:'<i>電話未知</i>'}</div>${b.website?`<div>🌐 <a target=_blank href="${esc(b.website)}">${esc(b.website)}</a></div>`:''}
- <div><a target=_blank style="display:inline-block;background:#1a73e8;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:bold" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name+' '+((b.address||'').replace(/（約略）/g,'')||('台南市'+(b.district||''))))}">📍 Google 地圖查位置</a>｜<small>${esc(b.source)}</small></div>
+ ${b.geo_updated_by?`<div><small>位置由 ${esc(vn(b.geo_updated_by))} 於 ${esc(b.geo_updated||'')} 修正</small></div>`:''}
+ <div><a target="_blank" rel="noopener" style="display:inline-block;background:#1a73e8;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:bold" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a>｜<small>${esc(b.source)}</small></div>
+ <button class="btn g" onclick="startFix('${esc(id)}')">修正位置</button>${ADM?`<button class="btn g" onclick="revertLoc('${esc(id)}')">還原上一個位置</button>`:''}
  ${canEdit(b)?`<button class="btn g" onclick="editBiz('${id}')">編輯店家資料</button> <button class="btn g" style="background:#c33" onclick="delBiz('${id}')">刪除店家</button>`:''}${b.created_by?`<div><small>新增者：${esc(vn(b.created_by))}</small></div>`:''}
  <h2 style="margin-top:12px">新增拜訪紀錄</h2>
  <div class=row><div><label>拜訪日期</label><input type=date id=vd value="${today}"></div><div><label>拜訪人</label><input id=vv value="${esc(me)}" ${ADM?'':'readonly style="background:#eee"'}></div></div>
@@ -119,18 +123,37 @@ async function geoAddr(){const a=$('b_address').value.trim(),d=$('b_district').v
  const q=async s=>{const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=tw&q='+encodeURIComponent(s));return (await r.json())[0]};
  try{const ad=/台南|臺南/.test(a)?a:'臺南市'+(a.includes(d)?'':d)+a;let r=await q(ad)||await q(ad.replace(/\d+(之\d+)?號.*$/,'').replace(/\d+弄.*$/,'').replace(/\d+巷.*$/,''))||await q(d+', 臺南市');
   if(!r)return alert('找不到這個地址，請直接在地圖上點選位置');$('b_lat').value=(+r.lat).toFixed(6);$('b_lng').value=(+r.lon).toFixed(6);setPin(r.lat,r.lon);map.setView([r.lat,r.lon],17)}catch(e){alert('查詢失敗，請直接在地圖上點選位置')}}
+let FIX=null;
+function clearFixMarker(){if(FIX&&FIX.marker){map.removeLayer(FIX.marker);FIX.marker=null}}
+function cancelFix(){const id=FIX&&FIX.id;clearFixMarker();FIX=null;if(id)show(id)}
+function startFix(id){const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(FIX)clearFixMarker();cur=id;
+ const lat=parseFloat(b.lat),lng=parseFloat(b.lng),ok=!isNaN(lat)&&!isNaN(lng);
+ const marker=ok?L.marker([lat,lng],{draggable:true,zIndexOffset:1000}).addTo(map):null;
+ FIX={id,marker};if(marker){marker.on('dragend',()=>{const p=marker.getLatLng();const el=$('fixPrev');if(el)el.textContent='預覽：'+p.lat.toFixed(6)+', '+p.lng.toFixed(6)});map.setView([lat,lng],17)}
+ $('side').innerHTML=`<button class="btn g" onclick="cancelFix()">← 返回</button><h2>修正位置</h2><div>${esc(b.name)}</div>
+ <p>拖曳藍色標記到正確地標，或貼上 Google 地圖連結、短網址，或「緯度, 經度」。先預覽，再按確認。名稱、地址、電話、備註和拜訪紀錄都不會改。</p>
+ <label>Google 地圖連結或座標</label><textarea id=fixIn rows=3 placeholder="https://maps.app.goo.gl/… 或 22.999, 120.160"></textarea>
+ <div id=fixPrev style="margin:6px 0">${ok?'目前：'+lat.toFixed(6)+', '+lng.toFixed(6):'這筆還沒有座標，請貼上連結後按預覽'}</div>
+ <button class="btn g" onclick="previewFix()">預覽</button> <button class=btn onclick="confirmFix()">確認</button> <button class="btn g" onclick="cancelFix()">取消</button>`}
+async function previewFix(){if(!FIX)return;const input=($('fixIn').value||'').trim();if(!input)return alert('請貼上 Google 地圖連結或座標');
+ try{const r=await api('/api/businesses/'+encodeURIComponent(FIX.id)+'/location',{input,preview:true});
+  if(!FIX.marker){FIX.marker=L.marker([r.lat,r.lng],{draggable:true,zIndexOffset:1000}).addTo(map);FIX.marker.on('dragend',()=>{const p=FIX.marker.getLatLng();$('fixPrev').textContent='預覽：'+p.lat.toFixed(6)+', '+p.lng.toFixed(6)})}
+  else FIX.marker.setLatLng([r.lat,r.lng]);map.setView([r.lat,r.lng],17);$('fixPrev').textContent='預覽：'+Number(r.lat).toFixed(6)+', '+Number(r.lng).toFixed(6)}catch(e){alert(e.message)}}
+async function confirmFix(){if(!FIX||!FIX.marker)return alert('請先拖曳標記，或貼上連結後按預覽');const p=FIX.marker.getLatLng();
+ try{const r=await api('/api/businesses/'+encodeURIComponent(FIX.id)+'/location',{lat:+p.lat.toFixed(6),lng:+p.lng.toFixed(6)});clearFixMarker();FIX=null;await load();show(r.id,1)}catch(e){alert(e.message)}}
+async function revertLoc(id){if(!confirm('還原這筆的上一個座標？名稱、地址與拜訪紀錄不會變。'))return;try{await api('/api/admin/location/revert',{business_id:id});await load();show(id,1)}catch(e){alert(e.message)}}
 function canEdit(b){return ADM||(b.created_by&&b.created_by===ME)}
 async function delBiz(id){if(!confirm('確定刪除這家店？'))return;try{await api('/api/business/delete',{id});cur=null;await load()}catch(e){alert(e.message)}}
 function newBiz(){cur='new';bizForm()}function editBiz(id){bizForm(DB.businesses.find(x=>x.id===id))}
 async function saveBiz(id){const b={};['name','address','phone','website','subtype','employees','note','district','category','lat','lng','pl'].forEach(k=>b[k]=$('b_'+k).value.trim());b.employees=b.employees?parseInt(b.employees)||'':'';b.group5=Number(b.employees)>=5;
  if(!b.name)return alert('請填名稱');b.lat=parseFloat(b.lat);b.lng=parseFloat(b.lng);if(isNaN(b.lat)||isNaN(b.lng))return alert('請在地圖上點選位置，或按「用地址找座標」');if(id)b.id=id;let r;try{r=await api('/api/business',b)}catch(e){return alert(e.message)}if(PIN){map.removeLayer(PIN);PIN=null}await load();show(r.id,1)}
-async function refreshList(){if(!confirm('重新抓取 OpenStreetMap 店家（台南八區）？\n只會新增有電話、非連鎖的新店家，既有拜訪紀錄與手動資料不會遺失（約需 1–3 分鐘，背景執行）'))return;
+async function refreshList(){if(!confirm('重新抓取 OpenStreetMap（台南八區）？\n只新增有電話且未被排除的新店家。已有的名稱、類別、地址、電話、備註、拜訪紀錄，以及已對齊地標的座標都不會改。這不是與 Google 地圖同步。（約 1–3 分鐘）'))return;
  try{await api('/api/refresh',{})}catch(e){return alert('更新失敗：'+e.message)}
  const tick=async()=>{try{const r=await (await fetch('/api/refresh_status',{cache:'no-store'})).json();if(r.running){$('stats').textContent='名單更新中：'+(r.step||'')+'…';return setTimeout(tick,5000)}
  const x=r.result||{};alert(`更新完成：OSM 新增 ${x.osm_added??'-'} 家、更新 ${x.osm_updated??'-'} 家；共 ${x.total} 家`+(x.osm_error?'\nOSM 錯誤：'+x.osm_error:'')+(x.fda_error?'\n非登不可錯誤：'+x.fda_error:''));load()}catch(e){setTimeout(tick,8000)}};tick()}
 function exportJSON(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));a.download='tainan_backup.json';a.click()}
 $('imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=f.name.endsWith('.json')?await api('/api/import.json',await f.text()):await api('/api/import.xlsx',f);alert('匯入完成：'+JSON.stringify(r))}catch(x){alert('匯入失敗：'+x.message)}e.target.value='';load()};
-['fd','fc','fs','fp','ff','fx','fl'].forEach(i=>$(i).onchange=()=>{cur=null;draw();doSearch()});$('q').oninput=()=>{cur=null;draw()};$('sq').oninput=doSearch;$('sq').onkeydown=e=>{if(e.key==='Enter'){const f=$('sres').querySelector('.li');if(f)f.click()}if(e.key==='Escape')$('sres').innerHTML=''};
+['fd','fc','fs','fp','ff','fx','fl'].forEach(i=>$(i).onchange=()=>{if(FIX){clearFixMarker();FIX=null}cur=null;draw();doSearch()});$('q').oninput=()=>{if(FIX){clearFixMarker();FIX=null}cur=null;draw()};$('sq').oninput=doSearch;$('sq').onkeydown=e=>{if(e.key==='Enter'){const f=$('sres').querySelector('.li');if(f)f.click()}if(e.key==='Escape')$('sres').innerHTML=''};
 fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';ME=j.user;$('me').textContent='　👤 '+j.user+(j.is_admin?'（管理員）':'');if(j.is_admin){ADM=true;document.querySelectorAll('.adm').forEach(e=>e.style.display='')}if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user)});
 let ADM=false,ME='';
 async function usersPanel(){cur='users';const r=await api('/api/users');
