@@ -16,7 +16,29 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 .legend{background:#fff;padding:6px;font-size:12px;line-height:18px}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
 #stats{font-size:12px;margin-left:auto}.li{padding:4px;border-bottom:1px solid #eee;cursor:pointer}.li:hover{background:#eef}
 #mapwrap{flex:1;position:relative;display:flex}#sbox{position:absolute;top:10px;left:55px;z-index:1000;width:min(380px,70%)}#sq{width:100%;padding:10px 12px;font-size:16px;border:2px solid #0b3d91;border-radius:6px;box-shadow:0 2px 6px #0003}#sres{background:#fff;max-height:50vh;overflow:auto;border-radius:0 0 6px 6px;box-shadow:0 2px 6px #0003;font-size:14px}
-@media(max-width:800px){#main{flex-direction:column}#side{width:100%;height:45%}}
+
+#locateFab{display:none}
+#sheetHandle{display:none}
+#sheet{display:contents}
+@media(max-width:768px){
+#main{flex-direction:column}
+#sheet{display:flex;flex-direction:column;flex:0 0 auto;width:100%;height:48px;max-height:60%;transition:height .25s ease;background:#fafafa;z-index:1200;min-height:0;padding-bottom:env(safe-area-inset-bottom,0)}
+#sheet.expanded{height:55%}
+#sheetHandle{display:flex;position:relative;flex:0 0 auto;min-height:48px;width:100%;align-items:center;justify-content:center;border:0;border-top:1px solid #ddd;background:#fff;font-size:15px;font-weight:700;color:#0b3d91;cursor:pointer;-webkit-user-select:none;user-select:none;touch-action:none;padding:14px 8px calc(8px + env(safe-area-inset-bottom,0))}
+#sheetHandle:before{content:"";position:absolute;top:6px;left:50%;width:36px;height:4px;margin-left:-18px;border-radius:2px;background:#c7c7c7}
+#side{width:100%;flex:1;min-height:0;overflow:auto;border-left:0;height:auto}
+#sheet:not(.expanded) #side{overflow:hidden}
+#locateFab{display:flex;position:absolute;right:14px;bottom:12px;width:52px;height:52px;border-radius:50%;background:#1565c0;color:#fff;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.5);z-index:1100;align-items:center;justify-content:center;padding:0;cursor:pointer;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+#locateFab svg{width:28px;height:28px;display:block;pointer-events:none}
+#locateFab.active{background:#0d47a1}
+#locateFab.waiting{background:#ef6c00}
+.locate-ctrl{display:none!important}
+#loctoast{bottom:auto;top:18%}
+html.dark #sheet,html.dark #sheetHandle{background:#161b22;color:#93c5fd;border-color:#30363d}
+html.dark #sheetHandle:before{background:#555}
+html.dark #locateFab{border-color:#eee;background:#1a73e8}
+}
+
 
 .locate-ctrl a{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#fff;color:#333;text-decoration:none;line-height:1;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
 .locate-ctrl a:hover{background:#f4f4f4}
@@ -84,7 +106,7 @@ html.dark .theme-ctrl a{background:#1f2937}
 <button class="adm" style="display:none" onclick="exportJSON()">備份 JSON</button>
 <button class="adm" style="display:none" onclick="usersPanel()">👥 帳號管理</button>
 <span id="stats"></span><span id="me" style="font-size:12px"></span> <a href="/api/logout" style="color:#fff;font-size:12px">登出</a></header>
-<div id="main"><div id="mapwrap"><div id="map"></div><div id="sbox"><input id="sq" placeholder="🔍 搜尋店名、地址、電話、行政區、類別、拜訪人" autocomplete="off"><div id="sres"></div></div></div><div id="side"></div></div>
+<div id="main"><div id="mapwrap"><div id="map"></div><div id="sbox"><input id="sq" placeholder="🔍 搜尋店名、地址、電話、行政區、類別、拜訪人" autocomplete="off"><div id="sres"></div></div><button type="button" id="locateFab" aria-label="我的位置" title="我的位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button></div><div id="sheet"><button type="button" id="sheetHandle" aria-expanded="false">▲ 記錄清單（0）</button><div id="side"></div></div></div>
 <script>
 const ST={"未拜訪":"#9e9e9e","已聯絡":"#1e88e5","有興趣":"#fb8c00","已成交":"#43a047","不需要":"#e53935"};
 const DS=["南區","北區","東區","中西區","安南區","永康區","安定區","安平區"];
@@ -125,7 +147,7 @@ let MK={};
 function hay(b){return [b.name,b.address,b.phone,b.district,b.category,b.subtype,b.industry,b.products,...DB.visits.filter(v=>v.business_id===b.id).flatMap(v=>[v.visitor,vn(v.visitor),v.created_by])].join(' ').toLowerCase()}
 function doSearch(){const q=$('sq').value.trim().toLowerCase(),el=$('sres');if(!q){el.innerHTML='';return}const t=q.split(/\s+/),r=filtered().filter(b=>{const h=hay(b);return t.every(x=>h.includes(x))});
  el.innerHTML=`<div style="padding:4px 8px;color:#666">${r.length} 筆${r.length>50?'（顯示前 50）':''}</div>`+r.slice(0,50).map(b=>`<div class=li onclick="pick('${b.id}')">${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}<br>${esc(b.address)}</small></div>`).join('')}
-function pick(id){$('sres').innerHTML='';const b=DB.businesses.find(x=>x.id===id);if(b&&b.lat!=null&&b.lat!==''){map.flyTo([b.lat,b.lng],17);const m=MK[id];if(m)setTimeout(()=>m.openPopup(),400)}show(id)}
+function pick(id){$('sres').innerHTML='';const b=DB.businesses.find(x=>x.id===id);if(isMobileSheet())setSheet(false);const go=()=>{if(b&&b.lat!=null&&b.lat!==''){map.flyTo([b.lat,b.lng],17);const m=MK[id];if(m)setTimeout(()=>m.openPopup(),400)}};if(isMobileSheet())setTimeout(()=>{map.invalidateSize();go()},280);else go();show(id)}
 function filtered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q').value.trim(),today=new Date().toISOString().slice(0,10);
  return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)&&(!$('fx').checked||String(b.category).startsWith('工廠'))&&(!$('fl').checked||isPL(b))
  &&(!q||hay(b).includes(q.toLowerCase()))&&(!$('ff').checked||((lastVisit(b.id)||{}).next_followup||'9')<=today))}
@@ -138,12 +160,12 @@ function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);
  .bindTooltip(esc(b.name)).bindPopup(()=>pinPopup(b)).on('click',()=>show(b.id)).addTo(layer)});
  const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
  $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜產責對象 ${DB.businesses.filter(isPL).length}｜團險有興趣 ${new Set(DB.visits.filter(v=>v.interest_group).map(v=>v.business_id)).size}｜產責有興趣 ${new Set(DB.visits.filter(v=>v.interest_pl).map(v=>v.business_id)).size}｜名單更新：${esc(DB.meta.last_refresh||'')}`;
- if(!cur)listView(f)}
+ if(!cur)listView(f);updateSheetHandle()}
 function listView(f){const today=new Date().toISOString().slice(0,10);
  const fu=DB.visits.filter(v=>v.next_followup).sort((a,b)=>a.next_followup.localeCompare(b.next_followup)).slice(0,30);
- $('side').innerHTML=`<h2>待追蹤（依下次追蹤日）</h2>${fu.map(v=>`<div class=li onclick="show('${v.business_id}')">${v.next_followup<=today?'⚠️':''}${esc(v.next_followup)} ${esc(v.business_name)}｜${esc(vn(v.visitor))}｜${esc(v.status)}</div>`).join('')||'<i>尚無</i>'}
+ $('side').innerHTML=`<h2>待追蹤（依下次追蹤日）</h2>${fu.map(v=>`<div class=li onclick="show('${v.business_id}',1)">${v.next_followup<=today?'⚠️':''}${esc(v.next_followup)} ${esc(v.business_name)}｜${esc(vn(v.visitor))}｜${esc(v.status)}</div>`).join('')||'<i>尚無</i>'}
  <h2 style="margin-top:12px">名單（前 200 筆，點選定位）</h2>${f.slice(0,200).map(b=>`<div class=li onclick="show('${b.id}',1)"><span class=dot style="background:${ST[b.status||'未拜訪']}"></span>${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}</small></div>`).join('')}`}
-function show(id,fly){if(FIX&&FIX.id!==id){clearFixMarker();FIX=null}cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(fly&&b.lat)map.setView([b.lat,b.lng],17);
+function show(id,fly){if(FIX&&FIX.id!==id){clearFixMarker();FIX=null}cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(fly&&b.lat){if(isMobileSheet()){setSheet(false);setTimeout(()=>{map.invalidateSize();map.setView([b.lat,b.lng],17)},280)}else map.setView([b.lat,b.lng],17)}
  const vs=DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date));const me=vn(ME||localStorage.getItem('tp_visitor')||''),today=new Date().toISOString().slice(0,10);
  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回清單</button>
  <h2>${esc(b.name)} <span class=tag style="background:${ST[b.status||'未拜訪']}">${esc(b.status||'未拜訪')}</span></h2>
@@ -236,17 +258,18 @@ function showMyDot(ll,acc){if(!LOC.marker){LOC.marker=L.marker(ll,{icon:L.divIco
   LOC.circle=L.circle(ll,{radius:acc||20,color:'#1a73e8',weight:1,fillColor:'#1a73e8',fillOpacity:.15,interactive:false}).addTo(map)}
  else{LOC.marker.setLatLng(ll);LOC.circle.setLatLng(ll);if(acc)LOC.circle.setRadius(acc)}}
 function stopWatchIfUnused(){if(LOC.active||SHARE.on)return;if(LOC.watch!=null){navigator.geolocation.clearWatch(LOC.watch);LOC.watch=null}if(LOC.marker){map.removeLayer(LOC.marker);LOC.marker=null}if(LOC.circle){map.removeLayer(LOC.circle);LOC.circle=null}LOC.latlng=null;LOC.acc=null}
-function stopLocate(){LOC.active=false;if(LOC.btn){LOC.btn.classList.remove('active','waiting');LOC.btn.title='我的位置（再點一次回到現在位置，長按停止）'}stopWatchIfUnused()}
+function stopLocate(){LOC.active=false;setLocUi(false,false);if(LOC.btn)LOC.btn.title='我的位置（再點一次回到現在位置，長按停止）';stopWatchIfUnused()}
 function onMyPos(pos){const ll=L.latLng(pos.coords.latitude,pos.coords.longitude),acc=Math.max(Number(pos.coords.accuracy)||0,0),first=!LOC.latlng;LOC.latlng=ll;LOC.acc=acc;
  if(LOC.active||SHARE.on)showMyDot(ll,acc);
- if(LOC.active&&LOC.btn){LOC.btn.classList.add('active');LOC.btn.classList.remove('waiting');LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}
- else if(LOC.btn)LOC.btn.classList.remove('waiting');
- if(first&&LOC.active)map.setView(ll,16);
+ setLocUi(LOC.active&&!!LOC.latlng, !LOC.latlng&&!!LOC.watch);
+ if(first&&LOC.active)map.setView(ll,locZoom());
  if(SHARE.on)maybePostPresence(ll,acc)}
-function onMyPosErr(e){if(LOC.btn)LOC.btn.classList.remove('waiting');if(!LOC.latlng){if(SHARE.on)stopShare(true);stopLocate();locErr(e)}}
-function ensureWatch(){if(!navigator.geolocation||window.isSecureContext===false){locErr({});return false}if(LOC.watch!=null)return true;if(LOC.btn)LOC.btn.classList.add('waiting');
+function onMyPosErr(e){setLocUi(!!(LOC.active&&LOC.latlng),false);if(!LOC.latlng){if(SHARE.on)stopShare(true);stopLocate();locErr(e)}}
+function ensureWatch(){if(!navigator.geolocation||window.isSecureContext===false){locErr({});return false}if(LOC.watch!=null)return true;setLocUi(false,true);
  LOC.watch=navigator.geolocation.watchPosition(onMyPos,onMyPosErr,{enableHighAccuracy:true,timeout:20000,maximumAge:5000});return true}
-function goToMe(){if(!navigator.geolocation||window.isSecureContext===false)return locErr({});LOC.active=true;if(LOC.latlng){showMyDot(LOC.latlng,LOC.acc||0);map.setView(LOC.latlng,16);if(LOC.btn){LOC.btn.classList.add('active');LOC.btn.classList.remove('waiting');LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}return}ensureWatch()}
+function locZoom(){return isMobileSheet()?17:16}
+function setLocUi(active,waiting){const els=[LOC.btn,$('locateFab')].filter(Boolean);els.forEach(el=>{el.classList.toggle('waiting',!!waiting);el.classList.toggle('active',!!active&&!waiting)});if(LOC.btn&&active&&!waiting)LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}
+function goToMe(){if(!navigator.geolocation||window.isSecureContext===false)return locErr({});LOC.active=true;if(LOC.latlng){showMyDot(LOC.latlng,LOC.acc||0);map.setView(LOC.latlng,locZoom());setLocUi(true,false);return}ensureWatch()}
 const locCtl=L.control({position:'topleft'});
 locCtl.onAdd=()=>{const wrap=L.DomUtil.create('div','leaflet-bar leaflet-control locate-ctrl');const a=L.DomUtil.create('a','',wrap);
  a.href='#';a.title='我的位置（再點一次回到現在位置，長按停止）';a.setAttribute('role','button');a.setAttribute('aria-label','我的位置');
@@ -277,5 +300,23 @@ async function pollPresence(){if(document.hidden)return;try{const j=await api('/
 window.addEventListener('pagehide',()=>{if(!SHARE.on)return;try{navigator.sendBeacon('/api/presence',new Blob([JSON.stringify({stop:true})],{type:'application/json'}))}catch(e){}});
 window.addEventListener('pageshow',e=>{if(e.persisted&&SHARE.on&&LOC.latlng)postPresence(LOC.latlng,LOC.acc)});
 setInterval(pollPresence,30000);setTimeout(pollPresence,1500);
+
+function isMobileSheet(){return window.matchMedia('(max-width:768px)').matches}
+function updateSheetHandle(){const h=$('sheetHandle');if(!h)return;const n=(DB&&Array.isArray(DB.businesses))?filtered().length:0;const open=isMobileSheet()&&$('sheet')&&$('sheet').classList.contains('expanded');h.textContent=(open?'▼ ':'▲ ')+'記錄清單（'+n+'）';h.setAttribute('aria-expanded',open?'true':'false')}
+function setSheet(open){const sh=$('sheet');if(!sh)return;if(!isMobileSheet()){sh.classList.remove('expanded');updateSheetHandle();return}sh.classList.toggle('expanded',!!open);updateSheetHandle();const kick=()=>{try{map.invalidateSize()}catch(e){}};setTimeout(kick,280);sh.addEventListener('transitionend',kick,{once:true})}
+function toggleSheet(){const sh=$('sheet');if(!sh||!isMobileSheet())return;setSheet(!sh.classList.contains('expanded'))}
+(function(){const h=$('sheetHandle');if(!h)return;let y0=0,tracking=false,fromPointer=false;
+ h.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;tracking=true;y0=e.clientY;try{h.setPointerCapture(e.pointerId)}catch(err){}});
+ h.addEventListener('pointerup',e=>{if(!tracking)return;tracking=false;fromPointer=true;const dy=e.clientY-y0;if(dy<-40)setSheet(true);else if(dy>40)setSheet(false);else toggleSheet()});
+ h.addEventListener('pointercancel',()=>{tracking=false});
+ h.addEventListener('click',e=>{if(fromPointer){fromPointer=false;e.preventDefault();return}toggleSheet()});
+})();
+const fab=$('locateFab');
+if(fab){let lpTimer=null,lpFired=false;const clearLp=()=>{if(lpTimer){clearTimeout(lpTimer);lpTimer=null}};
+ fab.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;lpFired=false;clearLp();lpTimer=setTimeout(()=>{lpFired=true;lpTimer=null;if(LOC.active||(LOC.watch!=null&&!SHARE.on)){stopLocate();locToast(SHARE.on?'已停止跟隨，位置分享仍開啟':'已停止定位')}},650)});
+ ['pointerup','pointercancel','pointerleave'].forEach(ev=>fab.addEventListener(ev,clearLp));
+ fab.addEventListener('contextmenu',e=>e.preventDefault());
+ fab.addEventListener('click',e=>{e.preventDefault();if(lpFired){lpFired=false;return}goToMe()});}
+window.addEventListener('resize',()=>{if(!isMobileSheet()){const sh=$('sheet');if(sh)sh.classList.remove('expanded')}updateSheetHandle();if(map)setTimeout(()=>map.invalidateSize(),100)});
 load();
 </script></body></html>
