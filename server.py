@@ -31,9 +31,13 @@ def bootstrap_users():
         n,_,pw=pair.partition(":")
         if n.strip() and pw and n.strip() not in us: us[n.strip()]=hashpw(pw)
     storage.put("users",us); return us
-ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}
-def is_admin(u): return bool(u) and u in ADMINS
-ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/admin/location/revert","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all"}
+ADMINS={x.strip() for x in os.environ.get("ADMINS","shihhan,仕翰").split(",") if x.strip()}   # 僅在資料庫尚未設定管理員時使用
+def admins():
+    """管理員名單存在資料庫（kv: admins），重啟或部署不會被環境變數蓋回去。"""
+    a=storage.get("admins")
+    return {str(x) for x in a if str(x).strip()} if isinstance(a,list) and a else set(ADMINS)
+def is_admin(u): return bool(u) and u in admins()
+ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/admin/location/revert","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all","/api/users/role"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
 BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
@@ -327,6 +331,17 @@ class H(SimpleHTTPRequestHandler):
                         else: us[n]=hashpw(os.environ.get("DEFAULT_PASSWORD","1234"))
                     storage.put("users",us)
                 return s.send_json({"ok":True})
+            if u.path=="/api/users/role":   # 僅管理員：設定/取消管理員，至少保留一位
+                d=json.loads(s.body()); n=str(d.get("username") or "").strip(); want=bool(d.get("admin"))
+                with LOCK:
+                    us=storage.get("users",{}) or {}
+                    if n not in us: return s.send_json({"error":"帳號不存在"},404)
+                    cur={x for x in admins() if x in us}
+                    if want: cur.add(n)
+                    else: cur.discard(n)
+                    if not cur: return s.send_json({"error":"至少要保留一位管理員"},400)
+                    storage.put("admins",sorted(cur))
+                return s.send_json({"ok":True,"admins":sorted(cur)})
             if u.path in("/api/users/password","/api/users/password_all"):   # 僅管理員
                 d=json.loads(s.body()); pw=str(d.get("password") or "")
                 if len(pw)<4 or len(pw)>100: return s.send_json({"error":"密碼至少 4 個字"},400)
