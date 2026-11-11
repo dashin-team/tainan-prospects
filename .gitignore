@@ -9,3 +9,4 @@ __pycache__/
 *.tmp
 .neon_url
 factory/*.json
+presence.json

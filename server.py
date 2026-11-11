@@ -225,6 +225,23 @@ def is_pl(b):
     if b.get("pl")=="N": return False
     if b.get("source")=="非登不可": return True
     return b.get("category") in PLC or b.get("subtype") in PLS or bool(PLN.search(str(b.get("name") or "")))
+PRESENCE_TTL=600
+def presence_update(user, body):
+    body=body or {}
+    if body.get("stop") is True or str(body.get("stop") or "").lower() in ("1","true","yes"):
+        storage.delete_presence(user); return {"ok":True,"stopped":True}
+    try: la=float(body["lat"]); ln=float(body["lng"])
+    except (KeyError,TypeError,ValueError): raise ValueError("請提供有效座標")
+    if not (la==la and ln==ln and abs(la)<=90 and abs(ln)<=180 and abs(la)!=float("inf") and abs(ln)!=float("inf")):
+        raise ValueError("座標格式不正確")
+    acc=body.get("accuracy")
+    try: acc=float(acc) if acc not in (None,"") else None
+    except (TypeError,ValueError): acc=None
+    if acc is not None and (acc<0 or acc!=acc or abs(acc)==float("inf")): acc=None
+    storage.upsert_presence(user, round(la,6), round(ln,6), acc)
+    return {"ok":True}
+def presence_list():
+    return {"ok":True,"presence":storage.list_presence(ttl=PRESENCE_TTL)}
 class H(SimpleHTTPRequestHandler):
     def __init__(s,*a,**k): super().__init__(*a,directory=os.path.join(D,"public"),**k)
     def send_bytes(s,b,ctype,code=200):
@@ -253,6 +270,7 @@ class H(SimpleHTTPRequestHandler):
         if s.guard(): return
         u=urlparse(s.path); q=parse_qs(u.query)
         if u.path=="/api/me": return s.send_json({"user":s.user(),"is_admin":is_admin(s.user())})
+        if u.path=="/api/presence": return s.send_json(presence_list())
         if u.path in("/api/export.xlsx","/api/users") and not is_admin(s.user()): return s.send_json({"error":"僅管理員可使用"},403)
         if u.path=="/api/users":
             us=storage.get("users",{}) or {}
@@ -286,6 +304,13 @@ class H(SimpleHTTPRequestHandler):
         u=urlparse(s.path); me=s.user()
         if u.path in ADMIN_POST and not is_admin(me): return s.send_json({"error":"僅管理員可使用"},403)
         try:
+            if u.path=="/api/presence":
+                raw=s.body() or b"{}"
+                try: d=json.loads(raw.decode() or "{}")
+                except Exception: return s.send_json({"error":"請提供有效座標"},400)
+                if not isinstance(d, dict): d={}
+                try: return s.send_json(presence_update(me, d))
+                except ValueError as e: return s.send_json({"error":str(e)},400)
             if u.path in("/api/users/add","/api/users/delete","/api/users/reset"):
                 n=str(json.loads(s.body()).get("name","")).strip()
                 if not n or len(n)>40: return s.send_json({"error":"請輸入名稱"},400)
@@ -460,6 +485,13 @@ class H(SimpleHTTPRequestHandler):
                 return s.send_json({"businesses":rb,"visits":rv})
         except Exception as e:
             return s.send_json({"error":str(e)},500)
+        s.send_json({"error":"not found"},404)
+
+    def do_DELETE(s):
+        if s.guard(): return
+        u=urlparse(s.path)
+        if u.path=="/api/presence":
+            storage.delete_presence(s.user()); return s.send_json({"ok":True,"stopped":True})
         s.send_json({"error":"not found"},404)
 if __name__=="__main__":
     import sys
