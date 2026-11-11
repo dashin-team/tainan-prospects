@@ -161,10 +161,18 @@ function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);
  const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
  $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜產責對象 ${DB.businesses.filter(isPL).length}｜團險有興趣 ${new Set(DB.visits.filter(v=>v.interest_group).map(v=>v.business_id)).size}｜產責有興趣 ${new Set(DB.visits.filter(v=>v.interest_pl).map(v=>v.business_id)).size}｜名單更新：${esc(DB.meta.last_refresh||'')}`;
  if(!cur)listView(f);updateSheetHandle()}
+let listAll=false;
+function isTeamAdded(b){return !!(String(b.created_by||'').trim())||b.source==='同事新增'}
 function listView(f){const today=new Date().toISOString().slice(0,10);
  const fu=DB.visits.filter(v=>v.next_followup).sort((a,b)=>a.next_followup.localeCompare(b.next_followup)).slice(0,30);
+ const team=f.filter(isTeamAdded).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+ const tog=listAll?`<a href="#" style="font-size:13px;font-weight:normal" onclick="listAll=false;draw();return false">只看夥伴新增</a>`:`<a href="#" style="font-size:13px;font-weight:normal" onclick="listAll=true;draw();return false">全部名單</a>`;
+ const head=listAll?`<h2 style="margin-top:12px">全部名單（前 200 筆，點選定位） ${tog}</h2>`:`<h2 style="margin-top:12px">夥伴新增的店家（${team.length}） ${tog}</h2>`;
+ const empty=DB.businesses.some(isTeamAdded)?`<div style="padding:8px 0;color:#666"><i>目前沒有符合篩選或搜尋條件的夥伴新增店家。可點「全部名單」或清除篩選再看。</i></div>`:`<div style="padding:8px 0;color:#666"><i>目前還沒有夥伴手動新增的店家。可用上方「＋新增店家」加入。</i></div>`;
+ const row=(b,extra)=>`<div class=li onclick="show('${b.id}',1)"><span class=dot style="background:${ST[b.status||'未拜訪']}"></span>${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)}${b.phone?' '+esc(b.phone):''}${extra||''}</small></div>`;
+ const body=listAll?f.slice(0,200).map(b=>row(b,'')).join(''):(team.length?team.map(b=>row(b,`<br>新增：${esc(vn(b.created_by||'')||'夥伴')} ${esc(String(b.created_at||'').slice(0,10))}`)).join(''):empty);
  $('side').innerHTML=`<h2>待追蹤（依下次追蹤日）</h2>${fu.map(v=>`<div class=li onclick="show('${v.business_id}',1)">${v.next_followup<=today?'⚠️':''}${esc(v.next_followup)} ${esc(v.business_name)}｜${esc(vn(v.visitor))}｜${esc(v.status)}</div>`).join('')||'<i>尚無</i>'}
- <h2 style="margin-top:12px">名單（前 200 筆，點選定位）</h2>${f.slice(0,200).map(b=>`<div class=li onclick="show('${b.id}',1)"><span class=dot style="background:${ST[b.status||'未拜訪']}"></span>${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}</small></div>`).join('')}`}
+ ${head}${body}`}
 function show(id,fly){if(FIX&&FIX.id!==id){clearFixMarker();FIX=null}cur=id;const b=DB.businesses.find(x=>x.id===id);if(!b)return;if(fly&&b.lat){if(isMobileSheet()){setSheet(false);setTimeout(()=>{map.invalidateSize();map.setView([b.lat,b.lng],17)},280)}else map.setView([b.lat,b.lng],17)}
  const vs=DB.visits.filter(v=>v.business_id===id).sort((a,b)=>String(b.date).localeCompare(a.date));const me=vn(ME||localStorage.getItem('tp_visitor')||''),today=new Date().toISOString().slice(0,10);
  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回清單</button>
