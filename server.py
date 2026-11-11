@@ -4,6 +4,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 import openpyxl, hashlib, secrets, hmac
 import storage, maplink
+from cat_display import display_category
 def _j(p,d):
     try: return json.load(open(p))
     except Exception: return d
@@ -40,8 +41,8 @@ def is_admin(u): return bool(u) and u in admins()
 ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/admin/location/revert","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all","/api/users/role"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
-BF=["id","name","category","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
-BH=["ID","名稱","類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註","產業類別","主要產品","工廠登記編號","統一編號","負責人","組織型態","資本額","員工人數","座標精度","產責對象","產責手動設定"]
+BF=["id","name","category","category_display","subtype","district","address","phone","website","lat","lng","status","source","note","industry","products","factory_reg_no","tax_id","owner","org_type","capital","employees","geo_precision","pl_target","pl"]
+BH=["ID","名稱","類別","顯示類別","細類","行政區","地址","電話","網站","緯度","經度","狀態","來源","備註","產業類別","主要產品","工廠登記編號","統一編號","負責人","組織型態","資本額","員工人數","座標精度","產責對象","產責手動設定"]
 VF=["id","business_id","business_name","district","date","visitor","contact","interest_group","interest_pl","status","next_followup","notes","created_by","updated"]
 VH=["紀錄ID","店家ID","店家名稱","行政區","拜訪日期","拜訪人","聯絡人","團險興趣","產責險興趣","狀態","下次追蹤日","備註","登錄帳號","更新時間"]
 def load():
@@ -57,6 +58,7 @@ def coords_locked(o):
     """已對齊地標或同事手動搬過的點，一般 OSM 更新不得再移動。"""
     return bool(o.get("geo_locked")) or o.get("geo_precision") in ("google","manual")
 def in_tainan(la,ln):
+    # 十區（含仁德、歸仁）約 22.894–23.135、120.065–120.327，此範圍已涵蓋
     return 22.8<la<23.5 and 119.9<ln<120.7
 def lock_text_fields(o, keys):
     cur=list(o.get("locked_fields") or [])
@@ -221,7 +223,7 @@ def read_sheet(ws,hdr,fields):
             if f in d: d[f]= str(d[f]).strip() in("是","True","TRUE","1","Y","y")
         d.pop("pl_target",None); out.append(d)
     return out
-PLC={"工廠","工廠/製造","食品製造","餐飲","食品零售"}
+PLC={"工廠","工廠/製造","食品製造","餐飲","餐飲業","食品零售"}
 PLS=set("bakery pastry confectionery deli tea coffee beverages butcher cheese chocolate pasta ice_cream dairy rice health_food nutrition_supplements herbalist food farm bbq marketplace craft pottery leather tailor shoemaker carpenter metal_construction machine_shop works factory industrial kitchen furniture perfumery".split())
 PLN=re.compile("食品|烘焙|麵包|蛋糕|糕餅|餅|茶|咖啡|飲料|冰|豆花|小吃|餐|麵|飯|食|肉|製造|工業|工廠|實業|加工|手作|釀")
 def is_pl(b):
@@ -298,7 +300,7 @@ class H(SimpleHTTPRequestHandler):
             with LOCK: db=load()
             t=q.get("type",["all"])[0]; sh=[]
             if t in("visits","all"): sh.append(("拜訪紀錄",VH,VF,sorted(db["visits"],key=lambda v:v.get("date",""),reverse=True)))
-            if t in("businesses","all"): sh.append(("店家名單",BH,BF,[{**b,"pl_target":is_pl(b)} for b in db["businesses"]]))
+            if t in("businesses","all"): sh.append(("店家名單",BH,BF,[{**b,"pl_target":is_pl(b),"category_display":display_category(b.get("category"))} for b in db["businesses"]]))
             b=xlsx(sh); s.send_response(200)
             s.send_header("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             s.send_header("Content-Disposition",f"attachment; filename=tainan_{t}_{datetime.date.today()}.xlsx"); s.send_header("Content-Length",len(b)); s.end_headers(); return s.wfile.write(b)

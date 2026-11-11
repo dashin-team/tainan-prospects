@@ -21,5 +21,5 @@ Leaflet 地圖 + Python 後端（標準函式庫 + openpyxl + pg8000）。
 `pip install -r requirements.txt && python3 server.py` → http://localhost:8080
 
 ## 資料
-- seed_businesses.json：OpenStreetMap（ODbL）台南七區店家/工廠，已排除便利商店、加油站、蝦皮店到店、全聯、台灣菸酒（exclude.py）
+- seed_businesses.json：OpenStreetMap（ODbL）台南十區（含仁德、歸仁）店家/工廠，已排除連鎖（fda/chains.py）、便利商店、加油站、蝦皮店到店、全聯、台灣菸酒（exclude.py）
 - 網頁「更新店家/工廠名單」重新從 Overpass 抓取並合併，不會覆蓋拜訪紀錄
