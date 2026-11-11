@@ -86,6 +86,19 @@ html.dark .leaflet-tooltip-top:before{border-top-color:#1f2937}
 html.dark .navbtn{background:#15803d;color:#fff!important}
 html.dark .tm-label{background:#1f2937;color:#fff;border-color:#ffb74d}
 html.dark .theme-ctrl a{background:#1f2937}
+
+#devToggle{position:absolute;top:58px;left:55px;z-index:1000;display:flex;background:#fff;border-radius:8px;box-shadow:0 2px 6px #0003;overflow:hidden;border:1px solid #c5d0dc;font-size:13px;font-weight:600}
+#devToggle button{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:#334155;padding:7px 10px;cursor:pointer;margin:0;border-radius:0;border-right:1px solid #e2e8f0;line-height:1.2;white-space:nowrap}
+#devToggle button:last-child{border-right:0}
+#devToggle button.on{background:#0b3d91;color:#fff}
+.legend .dot{border:2px solid #fff;box-shadow:0 0 0 1px #c5c5c5;vertical-align:middle}
+html.dark #devToggle{background:#1f2937;border-color:#374151;box-shadow:0 2px 6px #0007}
+html.dark #devToggle button{color:#e8e8e8;border-right-color:#374151}
+html.dark #devToggle button.on{background:#1d4ed8;color:#fff}
+@media(max-width:768px){
+#devToggle{left:10px;top:58px;max-width:calc(100% - 64px);font-size:12px}
+#devToggle button{padding:7px 8px}
+}
 </style></head><body>
 <header><h1>台南 團險/產責險 開發地圖</h1>
 <select id="fd"><option value="">全部行政區</option></select>
@@ -106,7 +119,7 @@ html.dark .theme-ctrl a{background:#1f2937}
 <button class="adm" style="display:none" onclick="exportJSON()">備份 JSON</button>
 <button class="adm" style="display:none" onclick="usersPanel()">👥 帳號管理</button>
 <span id="stats"></span><span id="me" style="font-size:12px"></span> <a href="/api/logout" style="color:#fff;font-size:12px">登出</a></header>
-<div id="main"><div id="mapwrap"><div id="map"></div><div id="sbox"><input id="sq" placeholder="🔍 搜尋店名、地址、電話、行政區、類別、拜訪人" autocomplete="off"><div id="sres"></div></div><button type="button" id="locateFab" aria-label="我的位置" title="我的位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button></div><div id="sheet"><button type="button" id="sheetHandle" aria-expanded="false">▲ 記錄清單（0）</button><div id="side"></div></div></div>
+<div id="main"><div id="mapwrap"><div id="map"></div><div id="sbox"><input id="sq" placeholder="🔍 搜尋店名、地址、電話、行政區、類別、拜訪人" autocomplete="off"><div id="sres"></div></div><div id="devToggle" role="tablist" aria-label="開發進度"><button type="button" data-dev="all" class="on" role="tab" aria-selected="true">全部</button><button type="button" data-dev="new" role="tab" aria-selected="false">未開發</button><button type="button" data-dev="done" role="tab" aria-selected="false">已開發</button></div><button type="button" id="locateFab" aria-label="我的位置" title="我的位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button></div><div id="sheet"><button type="button" id="sheetHandle" aria-expanded="false">▲ 記錄清單（0）</button><div id="side"></div></div></div>
 <script>
 const ST={"未拜訪":"#9e9e9e","已聯絡":"#1e88e5","有興趣":"#fb8c00","已成交":"#43a047","不需要":"#e53935"};
 const DS=["南區","北區","東區","中西區","安南區","永康區","安定區","安平區"];
@@ -119,7 +132,7 @@ function themePref(){try{const s=localStorage.getItem('tp_theme');if(s==='dark'|
 function applyTheme(mode,save){const dark=mode==='dark';document.documentElement.classList.toggle('dark',dark);document.body.classList.toggle('dark',dark);if(save){try{localStorage.setItem('tp_theme',mode)}catch(e){}}if(_tiles)map.removeLayer(_tiles);_tiles=(dark?TILE_DARK:TILE_LIGHT).addTo(map);const b=document.querySelector('.theme-ctrl a');if(b){b.textContent=dark?'☀️':'🌙';b.title=dark?'切換日間模式':'切換夜間模式';b.setAttribute('aria-label',b.title)}if(typeof draw==='function'&&DB&&DB.businesses){const c=cur;draw();cur=c;}}
 function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark',true)}
 
-const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML=Object.entries(ST).map(([k,c])=>`<span class=dot style="background:${c}"></span>${k}`).join('<br>');return d};lg.addTo(map);
+const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML=`<span class=dot style="background:#94a3b8"></span>未開發<br>`+Object.entries(ST).filter(([k])=>k!=='未拜訪').map(([k,c])=>`<span class=dot style="background:${c}"></span>${k}`).join('<br>')+`<br><span class=dot style="background:#60a5fa"></span>已開發（尚無狀態）`;return d};lg.addTo(map);
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(p,b){const r=await fetch(p,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},body:typeof b==='string'||b instanceof Blob?b:JSON.stringify(b)});if(r.status===401){location='/login.html';throw Error('未登入')}const j=await r.json();if(j.error)throw Error(j.error);return j}
 function saveCache(){try{const t=JSON.stringify(DB);if(t.length>1500000){localStorage.removeItem('tp_db');return}localStorage.setItem('tp_db',t)}catch(e){try{localStorage.removeItem('tp_db')}catch(_){}}}
@@ -148,16 +161,27 @@ function hay(b){return [b.name,b.address,b.phone,b.district,b.category,b.subtype
 function doSearch(){const q=$('sq').value.trim().toLowerCase(),el=$('sres');if(!q){el.innerHTML='';return}const t=q.split(/\s+/),r=filtered().filter(b=>{const h=hay(b);return t.every(x=>h.includes(x))});
  el.innerHTML=`<div style="padding:4px 8px;color:#666">${r.length} 筆${r.length>50?'（顯示前 50）':''}</div>`+r.slice(0,50).map(b=>`<div class=li onclick="pick('${b.id}')">${esc(b.name)} <small>${esc(b.district)}｜${esc(b.category)} ${esc(b.phone)}<br>${esc(b.address)}</small></div>`).join('')}
 function pick(id){$('sres').innerHTML='';const b=DB.businesses.find(x=>x.id===id);if(isMobileSheet())setSheet(false);const go=()=>{if(b&&b.lat!=null&&b.lat!==''){map.flyTo([b.lat,b.lng],17);const m=MK[id];if(m)setTimeout(()=>m.openPopup(),400)}};if(isMobileSheet())setTimeout(()=>{map.invalidateSize();go()},280);else go();show(id)}
-function filtered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q').value.trim(),today=new Date().toISOString().slice(0,10);
+let devMode=(function(){try{const s=localStorage.getItem('tp_dev');if(s==='new'||s==='done'||s==='all')return s}catch(e){}return 'all'})();
+function visitSet(){return new Set(DB.visits.map(v=>v.business_id))}
+function isDeveloped(b,vis){return (b.status&&b.status!=='未拜訪')||(vis||visitSet()).has(b.id)}
+function baseFiltered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q').value.trim(),today=new Date().toISOString().slice(0,10);
  return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)&&(!$('fx').checked||String(b.category).startsWith('工廠'))&&(!$('fl').checked||isPL(b))
  &&(!q||hay(b).includes(q.toLowerCase()))&&(!$('ff').checked||((lastVisit(b.id)||{}).next_followup||'9')<=today))}
+function filtered(){const vis=visitSet(),base=baseFiltered();if(devMode==='new')return base.filter(b=>!isDeveloped(b,vis));if(devMode==='done')return base.filter(b=>isDeveloped(b,vis));return base}
+function pinStyle(b,vis){const dev=isDeveloped(b,vis),st=b.status||'未拜訪';
+ if(!dev)return {radius:5,color:'#fff',weight:2,fillColor:'#94a3b8',fillOpacity:.8};
+ return {radius:7,color:'#fff',weight:2,fillColor:(st&&st!=='未拜訪')?(ST[st]||'#1e88e5'):'#60a5fa',fillOpacity:.92}}
+function updateDevToggle(){const el=$('devToggle');if(!el)return;const vis=visitSet(),base=baseFiltered(),done=base.filter(b=>isDeveloped(b,vis)).length,neu=base.length-done;
+ const lab={all:'全部 '+(base.length),new:'未開發 '+neu,done:'已開發 '+done};
+ el.querySelectorAll('button').forEach(btn=>{const v=btn.getAttribute('data-dev');btn.classList.toggle('on',v===devMode);btn.setAttribute('aria-selected',v===devMode?'true':'false');btn.textContent=lab[v]||v});}
 function gmapsHref(b){const addr=String(b.address||'').replace(/（約略）/g,'').trim();const q=(addr?`${b.name||''} ${addr}`:`${b.name||''} ${b.district||''} 台南`).trim();return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q)}
 function approxPin(b){return !!({road:1,village:1,district:1}[b.geo_precision])}
 function gmapsDirHref(b){const has=b.lat!=null&&b.lat!==''&&b.lng!=null&&b.lng!==''&&isFinite(+b.lat)&&isFinite(+b.lng);const addr=String(b.address||'').replace(/（約略）/g,'').trim();const q=(addr?`${b.name||''} ${addr}`:`${b.name||''} ${b.district||''} 台南`).trim();const dest=(has&&!approxPin(b))?(`${+b.lat},${+b.lng}`):q;return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(dest)+'&travelmode=driving'}
 function pinPopup(b){return `<b>${esc(b.name)}</b><br>${esc(b.district)}｜${esc(b.category)}<br>${esc(b.address||'')}${b.phone?'<br>📞 '+esc(b.phone):''}<div style="margin-top:8px"><a class="navbtn" target="_blank" rel="noopener" href="${esc(gmapsDirHref(b))}">Google 導航</a><a target="_blank" rel="noopener" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a></div><button type="button" style="margin-top:6px" onclick="event.stopPropagation();startFix('${esc(b.id)}')">修正位置</button>`}
-function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);MK={};const f=filtered();
- f.forEach(b=>{if(b.lat==null||b.lat==='')return;MK[b.id]=L.circleMarker([b.lat,b.lng],{radius:b.status&&b.status!=='未拜訪'?8:5,color:document.documentElement.classList.contains('dark')?'#eee':'#333',weight:1,fillColor:ST[b.status||'未拜訪'],fillOpacity:.85})
+function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);MK={};const vis=visitSet(),f=filtered();
+ f.forEach(b=>{if(b.lat==null||b.lat==='')return;MK[b.id]=L.circleMarker([b.lat,b.lng],pinStyle(b,vis))
  .bindTooltip(esc(b.name)).bindPopup(()=>pinPopup(b)).on('click',()=>show(b.id)).addTo(layer)});
+ updateDevToggle();
  const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
  $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜產責對象 ${DB.businesses.filter(isPL).length}｜團險有興趣 ${new Set(DB.visits.filter(v=>v.interest_group).map(v=>v.business_id)).size}｜產責有興趣 ${new Set(DB.visits.filter(v=>v.interest_pl).map(v=>v.business_id)).size}｜名單更新：${esc(DB.meta.last_refresh||'')}`;
  if(!cur)listView(f);updateSheetHandle()}
@@ -249,11 +273,13 @@ async function usersPanel(){cur='users';const r=await api('/api/users');
  <div class=row><button class="btn" onclick="allPw()">🔑 統一修改同事密碼</button></div>
  ${r.users.map(u=>`<div class=li>${esc(u.name)} ${u.is_admin?'<small>管理員</small>':''}
   <a href="#" onclick="uAct('reset',${esc(JSON.stringify(u.name))});return false">重設密碼為 1234</a>｜<a href="#" onclick="setPw(${esc(JSON.stringify(u.name))});return false">改密碼</a>
+  ｜<a href="#" onclick="setRole(${esc(JSON.stringify(u.name))},${!u.is_admin});return false">${u.is_admin?'取消管理員':'設為管理員'}</a>
   ${u.is_admin?'':`｜<a href="#" style="color:#c00" onclick="uAct('delete',${esc(JSON.stringify(u.name))});return false">刪除</a>`}</div>`).join('')}`}
 async function uAct(a,n){n=(n||'').trim();if(!n)return alert('請輸入名字');
  if(a==='delete'&&!confirm('確定刪除帳號「'+n+'」？'))return;if(a==='reset'&&!confirm('把「'+n+'」密碼重設為 1234？'))return;
  try{await api('/api/users/'+a,{name:n});alert('完成')}catch(e){alert(e.message)}usersPanel()}
 function askPw(t){const a=prompt(t);if(a===null)return null;if(a.length<4){alert('密碼至少 4 個字');return null}const b=prompt('再輸入一次確認');if(b===null)return null;if(a!==b){alert('兩次密碼不一致');return null}return a}
+async function setRole(n,a){if(!confirm(a?'把「'+n+'」設為管理員？':'取消「'+n+'」的管理員權限？'))return;try{await api('/api/users/role',{username:n,admin:a});alert('完成')}catch(e){alert(e.message)}usersPanel()}
 async function setPw(n){const p=askPw('「'+n+'」的新密碼（至少 4 個字）');if(!p)return;try{await api('/api/users/password',{username:n,password:p});alert('已更改「'+n+'」的密碼')}catch(e){alert(e.message)}}
 async function allPw(){const p=askPw('所有同事（非管理員）的新共用密碼（至少 4 個字）');if(!p)return;if(!confirm('確定把所有同事的密碼都改成這個？'))return;try{const r=await api('/api/users/password_all',{password:p});alert('已更改 '+r.count+' 個同事帳號的密碼')}catch(e){alert(e.message)}}
 
@@ -326,5 +352,7 @@ if(fab){let lpTimer=null,lpFired=false;const clearLp=()=>{if(lpTimer){clearTimeo
  fab.addEventListener('contextmenu',e=>e.preventDefault());
  fab.addEventListener('click',e=>{e.preventDefault();if(lpFired){lpFired=false;return}goToMe()});}
 window.addEventListener('resize',()=>{if(!isMobileSheet()){const sh=$('sheet');if(sh)sh.classList.remove('expanded')}updateSheetHandle();if(map)setTimeout(()=>map.invalidateSize(),100)});
+
+(function(){const el=$('devToggle');if(!el)return;el.addEventListener('click',e=>{const btn=e.target.closest('button[data-dev]');if(!btn)return;const v=btn.getAttribute('data-dev');if(v!=='all'&&v!=='new'&&v!=='done')return;devMode=v;try{localStorage.setItem('tp_dev',v)}catch(err){}draw()});})();
 load();
 </script></body></html>
