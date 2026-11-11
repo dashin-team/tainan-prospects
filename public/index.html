@@ -1,4 +1,5 @@
 <!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script>(function(){var s=null;try{s=localStorage.getItem("tp_theme")}catch(e){}var h=(new Date()).getHours();var d=s==="dark"||(s!=="light"&&(h>=18||h<6));document.documentElement.classList.toggle("dark",!!d);window.__tpTheme=d?"dark":"light"})();</script>
 <title>台南團險/產責險 開發追蹤地圖</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -27,6 +28,42 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 .myloc-icon:after{content:"";position:absolute;left:50%;top:50%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(26,115,232,.25);animation:mylocpulse 2s ease-out infinite;pointer-events:none}
 @keyframes mylocpulse{0%{transform:scale(.4);opacity:.8}100%{transform:scale(1.2);opacity:0}}
 #loctoast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 2px 8px #0005;display:none}
+
+#shareBtn.on{background:#047857;color:#fff;border-color:#059669}
+.navbtn{display:inline-block;background:#0b8a3d;color:#fff!important;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:bold;margin:4px 6px 0 0}
+.tm-wrap{background:transparent;border:0}
+.tm-label{background:#fff;color:#111;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600;box-shadow:0 1px 4px #0006;white-space:nowrap;border:2px solid #fb8c00;line-height:1.4;display:inline-block;transform:translate(-50%,-100%)}
+.theme-ctrl a{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#fff;text-decoration:none;font-size:18px;line-height:1;-webkit-user-select:none;user-select:none}
+html.dark,html.dark body{background:#111;color:#e8e8e8}
+html.dark header{background:#0d1117;color:#e8e8e8}
+html.dark header select,html.dark header input,html.dark header button{background:#1f2937;color:#e8e8e8;border-color:#374151}
+html.dark #shareBtn.on{background:#065f46;color:#d1fae5;border-color:#10b981}
+html.dark #side{background:#161b22;color:#e8e8e8;border-left-color:#30363d}
+html.dark #side input,html.dark #side select,html.dark #side textarea{background:#0d1117;color:#e8e8e8;border:1px solid #30363d}
+html.dark label{color:#c9d1d9}
+html.dark .visit{background:#0d1117;border-color:#30363d}
+html.dark .li{border-bottom-color:#30363d}
+html.dark .li:hover{background:#21262d}
+html.dark .legend{background:#161b22;color:#e8e8e8}
+html.dark #sq{background:#0d1117;color:#e8e8e8;border-color:#3b82f6}
+html.dark #sres{background:#161b22;color:#e8e8e8}
+html.dark a{color:#8ab4f8}
+html.dark .btn{background:#1d4ed8}
+html.dark .btn.g{background:#374151}
+html.dark #loadmsg{background:#161b22;color:#e8e8e8}
+html.dark #map{background:#111}
+html.dark .leaflet-popup-content-wrapper,html.dark .leaflet-popup-tip{background:#161b22;color:#e8e8e8}
+html.dark .leaflet-popup-content-wrapper a{color:#8ab4f8}
+html.dark .leaflet-bar a,html.dark .leaflet-bar a:hover{background:#1f2937;color:#e8e8e8;border-bottom-color:#30363d}
+html.dark .locate-ctrl a.active{background:#1e3a5f;color:#93c5fd}
+html.dark .locate-ctrl a.waiting{background:#3f3a1f;color:#fde68a}
+html.dark .leaflet-control-attribution{background:rgba(13,17,23,.8);color:#8b949e}
+html.dark .leaflet-control-attribution a{color:#8ab4f8}
+html.dark .leaflet-tooltip{background:#1f2937;color:#e8e8e8;border-color:#30363d}
+html.dark .leaflet-tooltip-top:before{border-top-color:#1f2937}
+html.dark .navbtn{background:#15803d;color:#fff!important}
+html.dark .tm-label{background:#1f2937;color:#fff;border-color:#ffb74d}
+html.dark .theme-ctrl a{background:#1f2937}
 </style></head><body>
 <header><h1>台南 團險/產責險 開發地圖</h1>
 <select id="fd"><option value="">全部行政區</option></select>
@@ -38,6 +75,7 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 <label style="color:#fff;margin:0"><input type="checkbox" id="fx"> 工廠/團險</label>
 <label style="color:#fff;margin:0"><input type="checkbox" id="fl"> 產品責任險</label>
 <button onclick="newBiz()">＋新增店家</button>
+<button id="shareBtn" onclick="toggleShare()" title="開始與已登入的同事分享你的位置（預設關閉）">分享我的位置</button>
 <button class="adm" style="display:none" onclick="refreshList()">⟳ 更新店家/工廠名單</button>
 <button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=visits'">匯出拜訪紀錄.xlsx</button>
 <button class="adm" style="display:none" onclick="location='/api/export.xlsx?type=businesses'">匯出店家名單.xlsx</button>
@@ -52,7 +90,13 @@ const ST={"未拜訪":"#9e9e9e","已聯絡":"#1e88e5","有興趣":"#fb8c00","已
 const DS=["南區","北區","東區","中西區","安南區","永康區","安定區","安平區"];
 let DB={businesses:[],visits:[],meta:{}},layer,cur=null,online=true;
 const map=L.map('map',{preferCanvas:true}).setView([23.0,120.21],13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
+const TILE_LIGHT=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'});
+const TILE_DARK=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>'});
+let _tiles=(document.documentElement.classList.contains('dark')?TILE_DARK:TILE_LIGHT).addTo(map);
+function themePref(){try{const s=localStorage.getItem('tp_theme');if(s==='dark'||s==='light')return s}catch(e){}const h=new Date().getHours();return (h>=18||h<6)?'dark':'light'}
+function applyTheme(mode,save){const dark=mode==='dark';document.documentElement.classList.toggle('dark',dark);document.body.classList.toggle('dark',dark);if(save){try{localStorage.setItem('tp_theme',mode)}catch(e){}}if(_tiles)map.removeLayer(_tiles);_tiles=(dark?TILE_DARK:TILE_LIGHT).addTo(map);const b=document.querySelector('.theme-ctrl a');if(b){b.textContent=dark?'☀️':'🌙';b.title=dark?'切換日間模式':'切換夜間模式';b.setAttribute('aria-label',b.title)}if(typeof draw==='function'&&DB&&DB.businesses){const c=cur;draw();cur=c;}}
+function toggleTheme(){applyTheme(document.documentElement.classList.contains('dark')?'light':'dark',true)}
+
 const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML=Object.entries(ST).map(([k,c])=>`<span class=dot style="background:${c}"></span>${k}`).join('<br>');return d};lg.addTo(map);
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(p,b){const r=await fetch(p,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},body:typeof b==='string'||b instanceof Blob?b:JSON.stringify(b)});if(r.status===401){location='/login.html';throw Error('未登入')}const j=await r.json();if(j.error)throw Error(j.error);return j}
@@ -86,9 +130,11 @@ function filtered(){const d=$('fd').value,c=$('fc').value,s=$('fs').value,q=$('q
  return DB.businesses.filter(b=>(!d||b.district===d)&&(!c||b.category===c)&&(!s||(b.status||'未拜訪')===s)&&(!$('fp').checked||b.phone)&&(!$('fx').checked||String(b.category).startsWith('工廠'))&&(!$('fl').checked||isPL(b))
  &&(!q||hay(b).includes(q.toLowerCase()))&&(!$('ff').checked||((lastVisit(b.id)||{}).next_followup||'9')<=today))}
 function gmapsHref(b){const addr=String(b.address||'').replace(/（約略）/g,'').trim();const q=(addr?`${b.name||''} ${addr}`:`${b.name||''} ${b.district||''} 台南`).trim();return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q)}
-function pinPopup(b){return `<b>${esc(b.name)}</b><br>${esc(b.district)}｜${esc(b.category)}<br>${esc(b.address||'')}${b.phone?'<br>📞 '+esc(b.phone):''}<div style="margin-top:6px"><a target="_blank" rel="noopener" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a></div><button type="button" style="margin-top:6px" onclick="event.stopPropagation();startFix('${esc(b.id)}')">修正位置</button>`}
+function approxPin(b){return !!({road:1,village:1,district:1}[b.geo_precision])}
+function gmapsDirHref(b){const has=b.lat!=null&&b.lat!==''&&b.lng!=null&&b.lng!==''&&isFinite(+b.lat)&&isFinite(+b.lng);const addr=String(b.address||'').replace(/（約略）/g,'').trim();const q=(addr?`${b.name||''} ${addr}`:`${b.name||''} ${b.district||''} 台南`).trim();const dest=(has&&!approxPin(b))?(`${+b.lat},${+b.lng}`):q;return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(dest)+'&travelmode=driving'}
+function pinPopup(b){return `<b>${esc(b.name)}</b><br>${esc(b.district)}｜${esc(b.category)}<br>${esc(b.address||'')}${b.phone?'<br>📞 '+esc(b.phone):''}<div style="margin-top:8px"><a class="navbtn" target="_blank" rel="noopener" href="${esc(gmapsDirHref(b))}">Google 導航</a><a target="_blank" rel="noopener" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a></div><button type="button" style="margin-top:6px" onclick="event.stopPropagation();startFix('${esc(b.id)}')">修正位置</button>`}
 function draw(){if(layer)map.removeLayer(layer);layer=L.layerGroup().addTo(map);MK={};const f=filtered();
- f.forEach(b=>{if(b.lat==null||b.lat==='')return;MK[b.id]=L.circleMarker([b.lat,b.lng],{radius:b.status&&b.status!=='未拜訪'?8:5,color:'#333',weight:1,fillColor:ST[b.status||'未拜訪'],fillOpacity:.85})
+ f.forEach(b=>{if(b.lat==null||b.lat==='')return;MK[b.id]=L.circleMarker([b.lat,b.lng],{radius:b.status&&b.status!=='未拜訪'?8:5,color:document.documentElement.classList.contains('dark')?'#eee':'#333',weight:1,fillColor:ST[b.status||'未拜訪'],fillOpacity:.85})
  .bindTooltip(esc(b.name)).bindPopup(()=>pinPopup(b)).on('click',()=>show(b.id)).addTo(layer)});
  const cnt=s=>DB.businesses.filter(b=>(b.status||'未拜訪')===s).length;
  $('stats').innerHTML=`顯示 ${f.length} / ${DB.businesses.length} 家｜`+Object.keys(ST).map(s=>s+' '+cnt(s)).join('｜')+`｜產責對象 ${DB.businesses.filter(isPL).length}｜團險有興趣 ${new Set(DB.visits.filter(v=>v.interest_group).map(v=>v.business_id)).size}｜產責有興趣 ${new Set(DB.visits.filter(v=>v.interest_pl).map(v=>v.business_id)).size}｜名單更新：${esc(DB.meta.last_refresh||'')}`;
@@ -104,7 +150,7 @@ function show(id,fly){if(FIX&&FIX.id!==id){clearFixMarker();FIX=null}cur=id;cons
  <div>${esc(b.district)}｜${esc(b.category)} ${esc(b.subtype)}</div><div>📍 ${esc(b.address)||'<i>地址未知</i>'}</div>${b.industry?`<div>🏭 ${esc(b.industry)}｜${esc(b.products)}</div><div><small>登記編號 ${esc(b.factory_reg_no)}｜統編 ${esc(b.tax_id)}｜${esc(b.org_type)}｜負責人 ${esc(b.owner)}</small></div>`:''}${b.capital?`<div>💰 資本額 ${Number(b.capital).toLocaleString()} 元</div>`:''}<div>👥 員工人數：${b.employees?esc(b.employees)+' 人'+(g5(b)?' <span class=tag style="background:#2a7">團險5人以上</span>':''):'<i>未知（可於編輯填入）</i>'}</div>${({road:'路段',village:'里',district:'行政區'})[b.geo_precision]?`<div><small>⚠️ 座標為${({road:'路段',village:'里',district:'行政區'})[b.geo_precision]}概略位置</small></div>`:''}
  <div>📞 ${b.phone?`<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>`:'<i>電話未知</i>'}</div>${b.website?`<div>🌐 <a target=_blank href="${esc(b.website)}">${esc(b.website)}</a></div>`:''}
  ${b.geo_updated_by?`<div><small>位置由 ${esc(vn(b.geo_updated_by))} 於 ${esc(b.geo_updated||'')} 修正</small></div>`:''}
- <div><a target="_blank" rel="noopener" style="display:inline-block;background:#1a73e8;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:bold" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a>｜<small>${esc(b.source)}</small></div>
+ <div><a class="navbtn" target="_blank" rel="noopener" href="${esc(gmapsDirHref(b))}">Google 導航</a><a target="_blank" rel="noopener" style="display:inline-block;background:#1a73e8;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:bold" href="${esc(gmapsHref(b))}">在 Google 地圖開啟</a>｜<small>${esc(b.source)}</small></div>
  <button class="btn g" onclick="startFix('${esc(id)}')">修正位置</button>${ADM?`<button class="btn g" onclick="revertLoc('${esc(id)}')">還原上一個位置</button>`:''}
  ${canEdit(b)?`<button class="btn g" onclick="editBiz('${id}')">編輯店家資料</button> <button class="btn g" style="background:#c33" onclick="delBiz('${id}')">刪除店家</button>`:''}${b.created_by?`<div><small>新增者：${esc(vn(b.created_by))}</small></div>`:''}
  <h2 style="margin-top:12px">新增拜訪紀錄</h2>
@@ -181,30 +227,55 @@ function askPw(t){const a=prompt(t);if(a===null)return null;if(a.length<4){alert
 async function setPw(n){const p=askPw('「'+n+'」的新密碼（至少 4 個字）');if(!p)return;try{await api('/api/users/password',{username:n,password:p});alert('已更改「'+n+'」的密碼')}catch(e){alert(e.message)}}
 async function allPw(){const p=askPw('所有同事（非管理員）的新共用密碼（至少 4 個字）');if(!p)return;if(!confirm('確定把所有同事的密碼都改成這個？'))return;try{const r=await api('/api/users/password_all',{password:p});alert('已更改 '+r.count+' 個同事帳號的密碼')}catch(e){alert(e.message)}}
 
-let LOC={watch:null,marker:null,circle:null,latlng:null,active:false,btn:null};
+let LOC={watch:null,marker:null,circle:null,latlng:null,active:false,btn:null,acc:null};
+let SHARE={on:false,lastPost:0,lastLL:null,timer:null};
+let TM={markers:{},timer:null};
 function locToast(t){let m=$('loctoast');if(!m){m=document.createElement('div');m.id='loctoast';document.body.appendChild(m)}m.textContent=t;m.style.display='';clearTimeout(locToast._t);locToast._t=setTimeout(()=>{m.style.display='none'},2200)}
 function locErr(e){const code=e&&e.code;if(!navigator.geolocation)return alert('這個瀏覽器不支援定位。請改用 Chrome 或 Safari，並允許位置權限。');if(window.isSecureContext===false)return alert('定位需要安全連線（HTTPS）。請用正式網址開啟這個地圖。');if(code===1)alert('無法取得位置：請在瀏覽器或手機設定中，允許這個網站使用定位後再試一次。');else if(code===2)alert('目前無法取得位置，請確認手機的定位已開啟後再試一次。');else if(code===3)alert('定位逾時，請到訊號較佳的地方再試一次。');else alert('無法取得位置，請稍後再試。')}
-function stopLocate(){if(LOC.watch!=null){navigator.geolocation.clearWatch(LOC.watch);LOC.watch=null}if(LOC.marker){map.removeLayer(LOC.marker);LOC.marker=null}if(LOC.circle){map.removeLayer(LOC.circle);LOC.circle=null}LOC.latlng=null;LOC.active=false;if(LOC.btn){LOC.btn.classList.remove('active','waiting');LOC.btn.title='我的位置（再點一次回到現在位置，長按停止）'}}
-function onMyPos(pos){const ll=L.latLng(pos.coords.latitude,pos.coords.longitude),acc=Math.max(Number(pos.coords.accuracy)||0,0),first=!LOC.latlng;LOC.latlng=ll;LOC.active=true;
- if(!LOC.marker){LOC.marker=L.marker(ll,{icon:L.divIcon({className:'myloc-wrap',html:'<div class="myloc-icon"></div>',iconSize:[16,16],iconAnchor:[8,8]}),interactive:false,keyboard:false,zIndexOffset:1500}).addTo(map);
+function showMyDot(ll,acc){if(!LOC.marker){LOC.marker=L.marker(ll,{icon:L.divIcon({className:'myloc-wrap',html:'<div class="myloc-icon"></div>',iconSize:[16,16],iconAnchor:[8,8]}),interactive:false,keyboard:false,zIndexOffset:1500}).addTo(map);
   LOC.circle=L.circle(ll,{radius:acc||20,color:'#1a73e8',weight:1,fillColor:'#1a73e8',fillOpacity:.15,interactive:false}).addTo(map)}
- else{LOC.marker.setLatLng(ll);LOC.circle.setLatLng(ll);if(acc)LOC.circle.setRadius(acc)}
- if(LOC.btn){LOC.btn.classList.add('active');LOC.btn.classList.remove('waiting');LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}
- if(first)map.setView(ll,16)}
-function onMyPosErr(e){if(LOC.btn)LOC.btn.classList.remove('waiting');if(!LOC.latlng){stopLocate();locErr(e)}}
-function goToMe(){if(!navigator.geolocation||window.isSecureContext===false)return locErr({});if(LOC.latlng){map.setView(LOC.latlng,16);return}if(LOC.watch!=null)return;if(LOC.btn)LOC.btn.classList.add('waiting');
- LOC.watch=navigator.geolocation.watchPosition(onMyPos,onMyPosErr,{enableHighAccuracy:true,timeout:20000,maximumAge:5000})}
+ else{LOC.marker.setLatLng(ll);LOC.circle.setLatLng(ll);if(acc)LOC.circle.setRadius(acc)}}
+function stopWatchIfUnused(){if(LOC.active||SHARE.on)return;if(LOC.watch!=null){navigator.geolocation.clearWatch(LOC.watch);LOC.watch=null}if(LOC.marker){map.removeLayer(LOC.marker);LOC.marker=null}if(LOC.circle){map.removeLayer(LOC.circle);LOC.circle=null}LOC.latlng=null;LOC.acc=null}
+function stopLocate(){LOC.active=false;if(LOC.btn){LOC.btn.classList.remove('active','waiting');LOC.btn.title='我的位置（再點一次回到現在位置，長按停止）'}stopWatchIfUnused()}
+function onMyPos(pos){const ll=L.latLng(pos.coords.latitude,pos.coords.longitude),acc=Math.max(Number(pos.coords.accuracy)||0,0),first=!LOC.latlng;LOC.latlng=ll;LOC.acc=acc;
+ if(LOC.active||SHARE.on)showMyDot(ll,acc);
+ if(LOC.active&&LOC.btn){LOC.btn.classList.add('active');LOC.btn.classList.remove('waiting');LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}
+ else if(LOC.btn)LOC.btn.classList.remove('waiting');
+ if(first&&LOC.active)map.setView(ll,16);
+ if(SHARE.on)maybePostPresence(ll,acc)}
+function onMyPosErr(e){if(LOC.btn)LOC.btn.classList.remove('waiting');if(!LOC.latlng){if(SHARE.on)stopShare(true);stopLocate();locErr(e)}}
+function ensureWatch(){if(!navigator.geolocation||window.isSecureContext===false){locErr({});return false}if(LOC.watch!=null)return true;if(LOC.btn)LOC.btn.classList.add('waiting');
+ LOC.watch=navigator.geolocation.watchPosition(onMyPos,onMyPosErr,{enableHighAccuracy:true,timeout:20000,maximumAge:5000});return true}
+function goToMe(){if(!navigator.geolocation||window.isSecureContext===false)return locErr({});LOC.active=true;if(LOC.latlng){showMyDot(LOC.latlng,LOC.acc||0);map.setView(LOC.latlng,16);if(LOC.btn){LOC.btn.classList.add('active');LOC.btn.classList.remove('waiting');LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}return}ensureWatch()}
 const locCtl=L.control({position:'topleft'});
 locCtl.onAdd=()=>{const wrap=L.DomUtil.create('div','leaflet-bar leaflet-control locate-ctrl');const a=L.DomUtil.create('a','',wrap);
  a.href='#';a.title='我的位置（再點一次回到現在位置，長按停止）';a.setAttribute('role','button');a.setAttribute('aria-label','我的位置');
  a.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>';
  L.DomEvent.disableClickPropagation(wrap);L.DomEvent.disableScrollPropagation(wrap);
  let lpTimer=null,lpFired=false;const clearLp=()=>{if(lpTimer){clearTimeout(lpTimer);lpTimer=null}};
- a.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;lpFired=false;clearLp();lpTimer=setTimeout(()=>{lpFired=true;lpTimer=null;if(LOC.active||LOC.watch!=null){stopLocate();locToast('已停止定位')}},650)});
+ a.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;lpFired=false;clearLp();lpTimer=setTimeout(()=>{lpFired=true;lpTimer=null;if(LOC.active||(LOC.watch!=null&&!SHARE.on)){stopLocate();locToast(SHARE.on?'已停止跟隨，位置分享仍開啟':'已停止定位')}},650)});
  ['pointerup','pointercancel','pointerleave'].forEach(ev=>a.addEventListener(ev,clearLp));
  a.addEventListener('contextmenu',e=>e.preventDefault());
  a.addEventListener('click',e=>{e.preventDefault();if(lpFired){lpFired=false;return}goToMe()});
  LOC.btn=a;return wrap};
 locCtl.addTo(map);
+const themeCtl=L.control({position:'topright'});
+themeCtl.onAdd=()=>{const wrap=L.DomUtil.create('div','leaflet-bar leaflet-control theme-ctrl');const a=L.DomUtil.create('a','',wrap);
+ a.href='#';a.setAttribute('role','button');const dark=document.documentElement.classList.contains('dark');a.textContent=dark?'☀️':'🌙';a.title=dark?'切換日間模式':'切換夜間模式';a.setAttribute('aria-label',a.title);
+ L.DomEvent.disableClickPropagation(wrap);L.DomEvent.disableScrollPropagation(wrap);
+ a.addEventListener('click',e=>{e.preventDefault();toggleTheme()});return wrap};
+themeCtl.addTo(map);
+if(document.body)document.body.classList.toggle('dark',document.documentElement.classList.contains('dark'));
+function updateShareBtn(){const b=$('shareBtn');if(!b)return;b.classList.toggle('on',SHARE.on);b.textContent=SHARE.on?'分享中・停止':'分享我的位置';b.title=SHARE.on?'目前正在與同事分享位置，點一下停止':'開始與已登入的同事分享你的位置（預設關閉）'}
+function maybePostPresence(ll,acc){if(!SHARE.on||!ll)return;const now=Date.now(),moved=SHARE.lastLL?map.distance(SHARE.lastLL,ll)>=40:true;if(SHARE.lastPost&&now-SHARE.lastPost<30000&&!moved)return;postPresence(ll,acc)}
+async function postPresence(ll,acc){if(!SHARE.on||!ll)return;try{await api('/api/presence',{lat:+(+ll.lat).toFixed(6),lng:+(+ll.lng).toFixed(6),accuracy:acc||0});SHARE.lastPost=Date.now();SHARE.lastLL=ll}catch(e){}}
+function stopShare(silent){SHARE.on=false;if(SHARE.timer){clearInterval(SHARE.timer);SHARE.timer=null}SHARE.lastPost=0;SHARE.lastLL=null;updateShareBtn();try{fetch('/api/presence',{method:'DELETE',credentials:'same-origin'})}catch(e){}stopWatchIfUnused();if(!silent)locToast('已停止分享位置')}
+function toggleShare(){if(SHARE.on){stopShare();return}if(!navigator.geolocation||window.isSecureContext===false){locErr({});return}SHARE.on=true;updateShareBtn();if(!ensureWatch()){SHARE.on=false;updateShareBtn();return}if(LOC.latlng){showMyDot(LOC.latlng,LOC.acc||0);postPresence(LOC.latlng,LOC.acc)}if(SHARE.timer)clearInterval(SHARE.timer);SHARE.timer=setInterval(()=>{if(SHARE.on&&LOC.latlng)postPresence(LOC.latlng,LOC.acc)},30000);locToast('已開始分享位置，只有開啟時同事才看得到')}
+function agoText(ts){const sec=Math.max(0,Math.round((Date.now()-(new Date(ts)).getTime())/1000));if(sec<60)return '剛剛';const m=Math.round(sec/60);if(m<60)return m+'分鐘前';return Math.round(m/60)+'小時前'}
+function tmIcon(p){return L.divIcon({className:'tm-wrap',html:'<div class="tm-label">'+esc(vn(p.user))+' · '+esc(agoText(p.updated_at))+'</div>',iconSize:[0,0],iconAnchor:[0,0]})}
+async function pollPresence(){if(document.hidden)return;try{const j=await api('/api/presence');const list=(j.presence||[]).filter(p=>p.user!==ME&&p.lat!=null&&p.lng!=null);const seen=new Set();list.forEach(p=>{seen.add(p.user);const ll=[p.lat,p.lng];if(TM.markers[p.user])TM.markers[p.user].setLatLng(ll).setIcon(tmIcon(p));else TM.markers[p.user]=L.marker(ll,{icon:tmIcon(p),interactive:false,keyboard:false,zIndexOffset:1400}).addTo(map)});Object.keys(TM.markers).forEach(u=>{if(!seen.has(u)){map.removeLayer(TM.markers[u]);delete TM.markers[u]}})}catch(e){}}
+window.addEventListener('pagehide',()=>{if(!SHARE.on)return;try{navigator.sendBeacon('/api/presence',new Blob([JSON.stringify({stop:true})],{type:'application/json'}))}catch(e){}});
+window.addEventListener('pageshow',e=>{if(e.persisted&&SHARE.on&&LOC.latlng)postPresence(LOC.latlng,LOC.acc)});
+setInterval(pollPresence,30000);setTimeout(pollPresence,1500);
 load();
 </script></body></html>
