@@ -16,6 +16,17 @@ header button{background:#fff;cursor:pointer}#main{flex:1;display:flex;min-heigh
 #stats{font-size:12px;margin-left:auto}.li{padding:4px;border-bottom:1px solid #eee;cursor:pointer}.li:hover{background:#eef}
 #mapwrap{flex:1;position:relative;display:flex}#sbox{position:absolute;top:10px;left:55px;z-index:1000;width:min(380px,70%)}#sq{width:100%;padding:10px 12px;font-size:16px;border:2px solid #0b3d91;border-radius:6px;box-shadow:0 2px 6px #0003}#sres{background:#fff;max-height:50vh;overflow:auto;border-radius:0 0 6px 6px;box-shadow:0 2px 6px #0003;font-size:14px}
 @media(max-width:800px){#main{flex-direction:column}#side{width:100%;height:45%}}
+
+.locate-ctrl a{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#fff;color:#333;text-decoration:none;line-height:1;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+.locate-ctrl a:hover{background:#f4f4f4}
+.locate-ctrl a.active{background:#e3f2fd;color:#1a73e8}
+.locate-ctrl a.waiting{background:#fff8e1}
+.locate-ctrl svg{width:18px;height:18px;display:block;pointer-events:none}
+.myloc-wrap{background:transparent;border:0}
+.myloc-icon{position:relative;width:16px;height:16px;background:#1a73e8;border:3px solid #fff;border-radius:50%;box-shadow:0 0 4px #0006}
+.myloc-icon:after{content:"";position:absolute;left:50%;top:50%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(26,115,232,.25);animation:mylocpulse 2s ease-out infinite;pointer-events:none}
+@keyframes mylocpulse{0%{transform:scale(.4);opacity:.8}100%{transform:scale(1.2);opacity:0}}
+#loctoast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 2px 8px #0005;display:none}
 </style></head><body>
 <header><h1>台南 團險/產責險 開發地圖</h1>
 <select id="fd"><option value="">全部行政區</option></select>
@@ -169,5 +180,31 @@ async function uAct(a,n){n=(n||'').trim();if(!n)return alert('請輸入名字');
 function askPw(t){const a=prompt(t);if(a===null)return null;if(a.length<4){alert('密碼至少 4 個字');return null}const b=prompt('再輸入一次確認');if(b===null)return null;if(a!==b){alert('兩次密碼不一致');return null}return a}
 async function setPw(n){const p=askPw('「'+n+'」的新密碼（至少 4 個字）');if(!p)return;try{await api('/api/users/password',{username:n,password:p});alert('已更改「'+n+'」的密碼')}catch(e){alert(e.message)}}
 async function allPw(){const p=askPw('所有同事（非管理員）的新共用密碼（至少 4 個字）');if(!p)return;if(!confirm('確定把所有同事的密碼都改成這個？'))return;try{const r=await api('/api/users/password_all',{password:p});alert('已更改 '+r.count+' 個同事帳號的密碼')}catch(e){alert(e.message)}}
+
+let LOC={watch:null,marker:null,circle:null,latlng:null,active:false,btn:null};
+function locToast(t){let m=$('loctoast');if(!m){m=document.createElement('div');m.id='loctoast';document.body.appendChild(m)}m.textContent=t;m.style.display='';clearTimeout(locToast._t);locToast._t=setTimeout(()=>{m.style.display='none'},2200)}
+function locErr(e){const code=e&&e.code;if(!navigator.geolocation)return alert('這個瀏覽器不支援定位。請改用 Chrome 或 Safari，並允許位置權限。');if(window.isSecureContext===false)return alert('定位需要安全連線（HTTPS）。請用正式網址開啟這個地圖。');if(code===1)alert('無法取得位置：請在瀏覽器或手機設定中，允許這個網站使用定位後再試一次。');else if(code===2)alert('目前無法取得位置，請確認手機的定位已開啟後再試一次。');else if(code===3)alert('定位逾時，請到訊號較佳的地方再試一次。');else alert('無法取得位置，請稍後再試。')}
+function stopLocate(){if(LOC.watch!=null){navigator.geolocation.clearWatch(LOC.watch);LOC.watch=null}if(LOC.marker){map.removeLayer(LOC.marker);LOC.marker=null}if(LOC.circle){map.removeLayer(LOC.circle);LOC.circle=null}LOC.latlng=null;LOC.active=false;if(LOC.btn){LOC.btn.classList.remove('active','waiting');LOC.btn.title='我的位置（再點一次回到現在位置，長按停止）'}}
+function onMyPos(pos){const ll=L.latLng(pos.coords.latitude,pos.coords.longitude),acc=Math.max(Number(pos.coords.accuracy)||0,0),first=!LOC.latlng;LOC.latlng=ll;LOC.active=true;
+ if(!LOC.marker){LOC.marker=L.marker(ll,{icon:L.divIcon({className:'myloc-wrap',html:'<div class="myloc-icon"></div>',iconSize:[16,16],iconAnchor:[8,8]}),interactive:false,keyboard:false,zIndexOffset:1500}).addTo(map);
+  LOC.circle=L.circle(ll,{radius:acc||20,color:'#1a73e8',weight:1,fillColor:'#1a73e8',fillOpacity:.15,interactive:false}).addTo(map)}
+ else{LOC.marker.setLatLng(ll);LOC.circle.setLatLng(ll);if(acc)LOC.circle.setRadius(acc)}
+ if(LOC.btn){LOC.btn.classList.add('active');LOC.btn.classList.remove('waiting');LOC.btn.title='我的位置（點一下回到現在位置，長按停止）'}
+ if(first)map.setView(ll,16)}
+function onMyPosErr(e){if(LOC.btn)LOC.btn.classList.remove('waiting');if(!LOC.latlng){stopLocate();locErr(e)}}
+function goToMe(){if(!navigator.geolocation||window.isSecureContext===false)return locErr({});if(LOC.latlng){map.setView(LOC.latlng,16);return}if(LOC.watch!=null)return;if(LOC.btn)LOC.btn.classList.add('waiting');
+ LOC.watch=navigator.geolocation.watchPosition(onMyPos,onMyPosErr,{enableHighAccuracy:true,timeout:20000,maximumAge:5000})}
+const locCtl=L.control({position:'topleft'});
+locCtl.onAdd=()=>{const wrap=L.DomUtil.create('div','leaflet-bar leaflet-control locate-ctrl');const a=L.DomUtil.create('a','',wrap);
+ a.href='#';a.title='我的位置（再點一次回到現在位置，長按停止）';a.setAttribute('role','button');a.setAttribute('aria-label','我的位置');
+ a.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>';
+ L.DomEvent.disableClickPropagation(wrap);L.DomEvent.disableScrollPropagation(wrap);
+ let lpTimer=null,lpFired=false;const clearLp=()=>{if(lpTimer){clearTimeout(lpTimer);lpTimer=null}};
+ a.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;lpFired=false;clearLp();lpTimer=setTimeout(()=>{lpFired=true;lpTimer=null;if(LOC.active||LOC.watch!=null){stopLocate();locToast('已停止定位')}},650)});
+ ['pointerup','pointercancel','pointerleave'].forEach(ev=>a.addEventListener(ev,clearLp));
+ a.addEventListener('contextmenu',e=>e.preventDefault());
+ a.addEventListener('click',e=>{e.preventDefault();if(lpFired){lpFired=false;return}goToMe()});
+ LOC.btn=a;return wrap};
+locCtl.addTo(map);
 load();
 </script></body></html>
