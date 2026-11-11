@@ -157,6 +157,9 @@ function plAuto(b){return b.source==='非登不可'||PLC.includes(b.category)||P
 function isPL(b){return b.pl==='Y'?true:b.pl==='N'?false:plAuto(b)}
 function g5(b){return b.group5===true||Number(b.employees)>=5}
 const VN={shihhan:'仕翰'};function vn(x){return VN[x]||x}
+function userAliases(u){const x=String(u||'').trim(),s=new Set();if(!x)return s;s.add(x);if(VN[x])s.add(VN[x]);Object.keys(VN).forEach(k=>{if(VN[k]===x)s.add(k)});return s}
+function isMe(u){return userAliases(ME).has(String(u||'').trim())}
+function isAddedByMe(b){return isMe(b.created_by)}
 let MK={};
 function catLabel(b){const c=(b&&b.category)||'';if(c==='工廠'||c==='工廠/製造'||c==='食品製造')return '工廠';if(c==='餐飲'||c==='餐飲業')return '餐飲業';return '其他'}
 function catText(b){const d=catLabel(b),o=(b&&b.category)||'';return (o&&d!==o)?d+'（'+o+'）':d}
@@ -195,10 +198,11 @@ let listAll=false;
 function isTeamAdded(b){return !!(String(b.created_by||'').trim())||b.source==='同事新增'}
 function listView(f){const today=new Date().toISOString().slice(0,10);
  const fu=DB.visits.filter(v=>v.next_followup).sort((a,b)=>a.next_followup.localeCompare(b.next_followup)).slice(0,30);
- const team=f.filter(isTeamAdded).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
- const tog=listAll?`<a href="#" style="font-size:13px;font-weight:normal" onclick="listAll=false;draw();return false">只看夥伴新增</a>`:`<a href="#" style="font-size:13px;font-weight:normal" onclick="listAll=true;draw();return false">全部名單</a>`;
- const head=listAll?`<h2 style="margin-top:12px">全部名單（前 200 筆，點選定位） ${tog}</h2>`:`<h2 style="margin-top:12px">夥伴新增的店家（${team.length}） ${tog}</h2>`;
- const empty=DB.businesses.some(isTeamAdded)?`<div style="padding:8px 0;color:#666"><i>目前沒有符合篩選或搜尋條件的夥伴新增店家。可點「全部名單」或清除篩選再看。</i></div>`:`<div style="padding:8px 0;color:#666"><i>目前還沒有夥伴手動新增的店家。可用上方「＋新增店家」加入。</i></div>`;
+ const mine=!ADM,pick=mine?isAddedByMe:isTeamAdded;
+ const team=f.filter(pick).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+ const tog=listAll?`<a href="#" style="font-size:13px;font-weight:normal" onclick="listAll=false;draw();return false">${mine?'只看我新增的':'只看夥伴新增'}</a>`:`<a href="#" style="font-size:13px;font-weight:normal" onclick="listAll=true;draw();return false">全部名單</a>`;
+ const head=listAll?`<h2 style="margin-top:12px">全部名單（前 200 筆，點選定位） ${tog}</h2>`:`<h2 style="margin-top:12px">${mine?'我新增的店家':'夥伴新增的店家'}（${team.length}） ${tog}</h2>`;
+ const empty=mine?(DB.businesses.some(isAddedByMe)?`<div style="padding:8px 0;color:#666"><i>目前沒有符合篩選或搜尋條件的店家。可點「全部名單」或清除篩選再看。</i></div>`:`<div style="padding:8px 0;color:#666"><i>你還沒新增店家，按『＋新增店家』開始</i></div>`):(DB.businesses.some(isTeamAdded)?`<div style="padding:8px 0;color:#666"><i>目前沒有符合篩選或搜尋條件的夥伴新增店家。可點「全部名單」或清除篩選再看。</i></div>`:`<div style="padding:8px 0;color:#666"><i>目前還沒有夥伴手動新增的店家。可用上方「＋新增店家」加入。</i></div>`);
  const row=(b,extra)=>`<div class=li onclick="show('${b.id}',1)"><span class=dot style="background:${ST[b.status||'未拜訪']}"></span>${esc(b.name)} <small>${esc(b.district)}｜${esc(catText(b))}${b.phone?' '+esc(b.phone):''}${extra||''}</small></div>`;
  const body=listAll?f.slice(0,200).map(b=>row(b,'')).join(''):(team.length?team.map(b=>row(b,`<br>新增：${esc(vn(b.created_by||'')||'夥伴')} ${esc(String(b.created_at||'').slice(0,10))}`)).join(''):empty);
  $('side').innerHTML=`<h2>待追蹤（依下次追蹤日）</h2>${fu.map(v=>`<div class=li onclick="show('${v.business_id}',1)">${v.next_followup<=today?'⚠️':''}${esc(v.next_followup)} ${esc(v.business_name)}｜${esc(vn(v.visitor))}｜${esc(v.status)}</div>`).join('')||'<i>尚無</i>'}
@@ -271,7 +275,7 @@ async function refreshList(){if(!confirm('重新抓取 OpenStreetMap（台南十
 function exportJSON(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));a.download='tainan_backup.json';a.click()}
 $('imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const r=f.name.endsWith('.json')?await api('/api/import.json',await f.text()):await api('/api/import.xlsx',f);alert('匯入完成：'+JSON.stringify(r))}catch(x){alert('匯入失敗：'+x.message)}e.target.value='';load()};
 ['fd','fc','fs','fp','ff','fx','fl','fo'].forEach(i=>$(i).onchange=()=>{if(i==='fo'){try{localStorage.setItem('tp_show_other',$('fo').checked?'1':'0')}catch(e){}}if(FIX){clearFixMarker();FIX=null}cur=null;draw();doSearch()});$('q').oninput=()=>{if(FIX){clearFixMarker();FIX=null}cur=null;draw()};$('sq').oninput=doSearch;$('sq').onkeydown=e=>{if(e.key==='Enter'){const f=$('sres').querySelector('.li');if(f)f.click()}if(e.key==='Escape')$('sres').innerHTML=''};
-fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';ME=j.user;$('me').textContent='　👤 '+j.user+(j.is_admin?'（管理員）':'');if(j.is_admin){ADM=true;document.querySelectorAll('.adm').forEach(e=>e.style.display='');const fo=$('fo');if(fo){try{fo.checked=localStorage.getItem('tp_show_other')==='1'}catch(e){}}if(typeof draw==='function'&&DB&&DB.businesses)draw()}if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user)});
+fetch('/api/me').then(r=>r.json()).then(j=>{if(!j.user)location='/login.html';ME=j.user;$('me').textContent='　👤 '+j.user+(j.is_admin?'（管理員）':'');if(j.is_admin){ADM=true;document.querySelectorAll('.adm').forEach(e=>e.style.display='');const fo=$('fo');if(fo){try{fo.checked=localStorage.getItem('tp_show_other')==='1'}catch(e){}}}if(!localStorage.getItem('tp_visitor'))localStorage.setItem('tp_visitor',j.user);if(typeof draw==='function'&&DB&&DB.businesses)draw()});
 let ADM=false,ME='';
 async function usersPanel(){cur='users';const r=await api('/api/users');
  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回</button><h2>帳號管理（${r.users.length}）</h2>
