@@ -1,13 +1,38 @@
-"""從 OpenStreetMap Overpass 抓取台南八區店家/工廠，輸出 businesses 清單。"""
+"""從 OpenStreetMap Overpass 抓取台南十區（含仁德、歸仁）店家/工廠，輸出 businesses 清單。"""
 import json, urllib.request, urllib.parse
 SERVERS=["https://overpass.openstreetmap.fr/api/interpreter","https://overpass-api.de/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
-BBOX="22.93,120.05,23.13,120.34"
-DISTS="南區|北區|東區|中西區|安南區|永康區|安定區|安平區"
+BBOX="22.88,120.05,23.15,120.34"  # south,west,north,east；涵蓋南區/安定區完整範圍及仁德、歸仁
+DISTS="南區|北區|東區|中西區|安南區|永康區|安定區|安平區|仁德區|歸仁區"
 Q_POI=f'[out:json][timeout:170][bbox:{BBOX}];(nwr["name"][~"^(shop|craft|industrial|amenity|office)$"~"."];nwr["name"]["man_made"="works"];nwr["name"]["landuse"="industrial"];nwr["name"]["building"~"^(industrial|factory|warehouse)$"];);out center tags;'
 Q_BND=f'[out:json][timeout:120][bbox:{BBOX}];rel["boundary"="administrative"]["admin_level"="7"]["name"~"^({DISTS})$"];out geom;'
 FOOD_AMEN={"restaurant","cafe","fast_food","bar","pub","food_court","ice_cream","biergarten"}
 SVC_AMEN={"clinic","dentist","doctors","pharmacy","veterinary","car_wash","fuel","kindergarten","childcare","bank","marketplace","nursing_home","car_rental"}
 FOOD_SHOP={"bakery","confectionery","butcher","seafood","deli","beverages","tea","coffee","pastry","greengrocer","dairy","alcohol","frozen_food","food","cheese","chocolate","spices","farm","rice","noodle","health_food","supermarket","convenience"}
+CLOSED_SHOP={"vacant","closed"}
+def is_closed(t):
+    t=t or {}
+    if (t.get("shop") or t.get("amenity") or t.get("office") or "") in CLOSED_SHOP: return True
+    if str(t.get("opening_hours") or "").strip().lower() in ("closed","off"): return True
+    for k,v in t.items():
+        kl=k.lower()
+        if kl.startswith(("disused:","abandoned:","razed:","demolished:")): return True
+        if kl in ("disused","abandoned","razed","demolished") and str(v).lower() in ("yes","true","1"): return True
+    return False
+def _chain(name):
+    import os,sys
+    fda=os.path.join(os.path.dirname(os.path.abspath(__file__)),"fda")
+    if fda not in sys.path: sys.path.insert(0,fda)
+    from chains import chain
+    return chain(name)
+
+def dedupe_same_place(rows):
+    seen=set(); out=[]
+    for b in rows:
+        key=(b.get("name"), str(b.get("phone") or "").strip(), b.get("district"), str(b.get("address") or "").strip())
+        if key in seen: continue
+        seen.add(key); out.append(b)
+    return out
+
 def overpass(q):
     err=None
     for s in SERVERS:
@@ -53,7 +78,7 @@ def fetch():
     res=[]
     for e in overpass(Q_POI)["elements"]:
         t=e.get("tags",{}); cat=category(t)
-        if not cat: continue
+        if not cat or is_closed(t): continue
         lat=e.get("lat") or e.get("center",{}).get("lat"); lon=e.get("lon") or e.get("center",{}).get("lon")
         if lat is None: continue
         d=next((n for n,S in bnd.items() if inside(lon,lat,S)),None)
@@ -63,6 +88,7 @@ def fetch():
           "address":addr(t),"phone":t.get("phone") or t.get("contact:phone") or "","website":t.get("website") or t.get("contact:website") or "",
           "lat":round(lat,6),"lng":round(lon,6),"source":f"OpenStreetMap {e['type']}/{e['id']}"})
     from exclude import excluded
-    return [b for b in res if not excluded(b)]
+    keep=[b for b in res if not excluded(b) and not _chain(b.get("name"))]
+    return dedupe_same_place(keep)
 if __name__=="__main__":
     r=fetch(); print(len(r))
