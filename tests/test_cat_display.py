@@ -1,5 +1,5 @@
 import unittest
-from cat_display import display_category, DISPLAY, FACTORY, FOOD
+from cat_display import display_category, DISPLAY, FACTORY, FOOD, visible_on_map
 import fetch_osm, server
 
 class TestCatDisplay(unittest.TestCase):
@@ -11,6 +11,15 @@ class TestCatDisplay(unittest.TestCase):
         for c in ("食品零售","零售/店家","服務業","公司/辦公室","銀行",""):
             self.assertEqual(display_category(c),"其他")
         self.assertEqual(DISPLAY,("工廠","餐飲業","其他"))
+    def test_hide_other_by_default(self):
+        self.assertTrue(visible_on_map("工廠"))
+        self.assertTrue(visible_on_map("餐飲"))
+        self.assertTrue(visible_on_map("食品製造"))
+        self.assertFalse(visible_on_map("食品零售"))
+        self.assertFalse(visible_on_map("服務業"))
+        self.assertTrue(visible_on_map("服務業", has_followup=True))
+        self.assertTrue(visible_on_map("零售/店家", show_other=True))
+        self.assertTrue(visible_on_map("食品零售", show_other=True, has_followup=True))
     def test_export_includes_display_column(self):
         self.assertIn("category_display", server.BF)
         self.assertEqual(server.BF[server.BF.index("category")], "category")
