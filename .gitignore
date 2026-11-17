@@ -10,3 +10,4 @@ __pycache__/
 .neon_url
 factory/*.json
 presence.json
+last_seen.json
