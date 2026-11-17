@@ -99,6 +99,12 @@ html.dark #devToggle button.on{background:#1d4ed8;color:#fff}
 #devToggle{left:10px;top:58px;max-width:calc(100% - 64px);font-size:12px}
 #devToggle button{padding:7px 8px}
 }
+
+.act-row{padding:10px 4px;border-bottom:1px solid #eee;cursor:default}
+.act-row .nm{font-weight:700}
+.act-row .meta{font-size:13px;color:#555;margin-top:4px;line-height:1.55}
+html.dark .act-row{border-bottom-color:#30363d}
+html.dark .act-row .meta{color:#9aa4b2}
 </style></head><body>
 <header><h1>台南 團險/產責險 開發地圖</h1>
 <select id="fd"><option value="">全部行政區</option></select>
@@ -119,6 +125,7 @@ html.dark #devToggle button.on{background:#1d4ed8;color:#fff}
 <button class="adm" style="display:none" onclick="imp.click()">匯入 xlsx/json</button><input type="file" id="imp" accept=".xlsx,.json" hidden>
 <button class="adm" style="display:none" onclick="exportJSON()">備份 JSON</button>
 <button class="adm" style="display:none" onclick="usersPanel()">👥 帳號管理</button>
+<button class="adm" style="display:none" onclick="activityPanel()">登入狀況</button>
 <span id="stats"></span><span id="me" style="font-size:12px"></span> <a href="/api/logout" style="color:#fff;font-size:12px">登出</a></header>
 <div id="main"><div id="mapwrap"><div id="map"></div><div id="sbox"><input id="sq" placeholder="🔍 搜尋店名、地址、電話、行政區、類別、拜訪人" autocomplete="off"><div id="sres"></div></div><div id="devToggle" role="tablist" aria-label="開發進度"><button type="button" data-dev="all" class="on" role="tab" aria-selected="true">全部</button><button type="button" data-dev="new" role="tab" aria-selected="false">未開發</button><button type="button" data-dev="done" role="tab" aria-selected="false">已開發</button></div><button type="button" id="locateFab" aria-label="我的位置" title="我的位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button></div><div id="sheet"><button type="button" id="sheetHandle" aria-expanded="false">▲ 記錄清單（0）</button><div id="side"></div></div></div>
 <script>
@@ -292,6 +299,32 @@ function askPw(t){const a=prompt(t);if(a===null)return null;if(a.length<4){alert
 async function setRole(n,a){if(!confirm(a?'把「'+n+'」設為管理員？':'取消「'+n+'」的管理員權限？'))return;try{await api('/api/users/role',{username:n,admin:a});alert('完成')}catch(e){alert(e.message)}usersPanel()}
 async function setPw(n){const p=askPw('「'+n+'」的新密碼（至少 4 個字）');if(!p)return;try{await api('/api/users/password',{username:n,password:p});alert('已更改「'+n+'」的密碼')}catch(e){alert(e.message)}}
 async function allPw(){const p=askPw('所有同事（非管理員）的新共用密碼（至少 4 個字）');if(!p)return;if(!confirm('確定把所有同事的密碼都改成這個？'))return;try{const r=await api('/api/users/password_all',{password:p});alert('已更改 '+r.count+' 個同事帳號的密碼')}catch(e){alert(e.message)}}
+
+
+function fmtSeen(iso){
+  if(!iso)return '從未登入（上線後開始記錄）';
+  const d=new Date(iso);
+  if(isNaN(+d))return '從未登入（上線後開始記錄）';
+  const parts=(dt,opt)=>{const o={};new Intl.DateTimeFormat('en-CA',Object.assign({timeZone:'Asia/Taipei',hour12:false},opt)).formatToParts(dt).forEach(p=>{if(p.type!=='literal')o[p.type]=p.value});return o};
+  const t=parts(d,{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const n=parts(new Date(),{year:'numeric',month:'2-digit',day:'2-digit'});
+  const day=(y,m,da)=>Date.UTC(+y,+m-1,+da);
+  const diff=Math.round((day(n.year,n.month,n.day)-day(t.year,t.month,t.day))/86400000);
+  const hm=String(t.hour||'00').padStart(2,'0')+':'+String(t.minute||'00').padStart(2,'0');
+  if(diff<=0)return '今天 '+hm;
+  if(diff===1)return '昨天 '+hm;
+  if(diff<30)return diff+' 天前';
+  return t.year+'/'+t.month+'/'+t.day+' '+hm;
+}
+async function activityPanel(){
+  cur='activity';
+  if(typeof setSheet==='function')setSheet(true);
+  let r;try{r=await api('/api/users/activity')}catch(e){return alert(e.message)}
+  const rows=(r.users||[]).map(u=>`<div class="act-row"><div class="nm">${esc(u.name)}${u.is_admin?' <small>管理員</small>':''}</div><div class="meta">最後登入：${esc(fmtSeen(u.last_login))}<br>最後上線：${esc(fmtSeen(u.last_active))}</div></div>`).join('');
+  $('side').innerHTML=`<button class="btn g" onclick="cur=null;draw()">← 返回</button><h2>登入狀況（${(r.users||[]).length}）</h2>
+  <div style="font-size:12px;color:#666;margin:4px 0 8px">時間為台北時間。功能上線後才開始記錄；用已登入狀態打開地圖也會更新「最後上線」。</div>
+  ${rows||'<div style="padding:8px 0;color:#666"><i>目前沒有帳號</i></div>'}`;
+}
 
 let LOC={watch:null,marker:null,circle:null,latlng:null,active:false,btn:null,acc:null};
 let SHARE={on:false,lastPost:0,lastLL:null,timer:null};

@@ -38,6 +38,69 @@ def admins():
     a=storage.get("admins")
     return {str(x) for x in a if str(x).strip()} if isinstance(a,list) and a else set(ADMINS)
 def is_admin(u): return bool(u) and u in admins()
+LAST_SEEN_KEY="last_seen"
+LAST_SEEN_THROTTLE=300   # 已登入請求最多每 5 分鐘寫一次最後上線
+_TZ_TPE=datetime.timezone(datetime.timedelta(hours=8))
+_last_touch={}
+_touch_lock=threading.Lock()
+def now_utc():
+    return datetime.datetime.now(datetime.timezone.utc)
+def parse_ts(v):
+    if isinstance(v, datetime.datetime):
+        return v if v.tzinfo else v.replace(tzinfo=datetime.timezone.utc)
+    if v in (None,""): return None
+    x=str(v).strip().replace("Z","+00:00")
+    try: dt=datetime.datetime.fromisoformat(x)
+    except ValueError: return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc)
+def iso_utc(v):
+    dt=parse_ts(v)
+    return dt.astimezone(datetime.timezone.utc).isoformat() if dt else None
+def iso_tpe(v):
+    dt=parse_ts(v)
+    return dt.astimezone(_TZ_TPE).isoformat() if dt else None
+def _seen_map():
+    d=storage.get(LAST_SEEN_KEY,{}) or {}
+    return d if isinstance(d, dict) else {}
+def record_login(user, at=None):
+    """成功登入時記錄最後登入與最後上線。"""
+    if not user: return
+    ts=iso_utc(at or now_utc())
+    with LOCK:
+        d=_seen_map()
+        rec=d.get(user) if isinstance(d.get(user), dict) else {}
+        rec["last_login"]=ts; rec["last_active"]=ts; d[user]=rec
+        storage.put(LAST_SEEN_KEY,d)
+        _last_touch[user]=parse_ts(ts)
+def touch_active(user, at=None, throttle=None):
+    """已驗證的 API 請求更新最後上線；預設 5 分鐘內不重複寫入。"""
+    if not user: return False
+    now=parse_ts(at) or now_utc()
+    thr=LAST_SEEN_THROTTLE if throttle is None else int(throttle)
+    with _touch_lock:
+        prev=_last_touch.get(user)
+        if prev and (now-prev).total_seconds()<thr: return False
+    with LOCK:
+        d=_seen_map()
+        rec=d.get(user) if isinstance(d.get(user), dict) else {}
+        stored=parse_ts(rec.get("last_active"))
+        if stored and (now-stored).total_seconds()<thr:
+            _last_touch[user]=stored; return False
+        rec["last_active"]=iso_utc(now); d[user]=rec
+        storage.put(LAST_SEEN_KEY,d)
+        _last_touch[user]=now
+        return True
+def users_activity():
+    """每位帳號的最後登入／最後上線（台北時區 ISO）。依最近活動排序。"""
+    us=storage.get("users",{}) or {}; seen=_seen_map(); out=[]
+    for n in us:
+        rec=seen.get(n) if isinstance(seen.get(n), dict) else {}
+        out.append({"name":n,"is_admin":is_admin(n),"last_login":iso_tpe(rec.get("last_login")),"last_active":iso_tpe(rec.get("last_active"))})
+    def sk(r):
+        a=parse_ts(r.get("last_active")) or parse_ts(r.get("last_login"))
+        return (0 if a else 1, -(a.timestamp()) if a else 0, r["name"])
+    out.sort(key=sk)
+    return {"users":out}
 ADMIN_POST={"/api/refresh","/api/admin/bulk","/api/admin/coordinates","/api/admin/location/revert","/api/import.json","/api/import.xlsx","/api/users/add","/api/users/delete","/api/users/reset","/api/users/password","/api/users/password_all","/api/users/role"}
 PUBLIC={"/login.html","/api/login","/healthz"}
 D=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(D,"data.json"); LOCK=threading.Lock()
@@ -272,15 +335,25 @@ class H(SimpleHTTPRequestHandler):
         if p.startswith("/api/"): s.send_json({"error":"請先登入"},401)
         else: s.send_response(302); s.send_header("Location","/login.html"); s.end_headers()
         return True
+    def touch_if_api(s):
+        p=urlparse(s.path).path
+        if not p.startswith("/api/") or p=="/api/login": return
+        u=s.user()
+        if not u: return
+        try: touch_active(u)
+        except Exception: pass
     def do_GET(s):
         if s.guard(): return
+        s.touch_if_api()
         u=urlparse(s.path); q=parse_qs(u.query)
         if u.path=="/api/me": return s.send_json({"user":s.user(),"is_admin":is_admin(s.user())})
         if u.path=="/api/presence": return s.send_json(presence_list())
-        if u.path in("/api/export.xlsx","/api/users") and not is_admin(s.user()): return s.send_json({"error":"僅管理員可使用"},403)
+        if u.path in("/api/export.xlsx","/api/users","/api/users/activity") and not is_admin(s.user()): return s.send_json({"error":"僅管理員可使用"},403)
         if u.path=="/api/users":
             us=storage.get("users",{}) or {}
             return s.send_json({"users":[{"name":n,"is_admin":is_admin(n)} for n in us]})
+        if u.path=="/api/users/activity":
+            return s.send_json(users_activity())
         if u.path=="/api/logout":
             s.send_response(302); s.send_header("Set-Cookie","tp_session=; Max-Age=0; Path=/"); s.send_header("Location","/login.html"); s.end_headers(); return
         if u.path=="/healthz": return s.send_json({"ok":True,"storage":storage.backend()})
@@ -307,6 +380,7 @@ class H(SimpleHTTPRequestHandler):
         return super().do_GET()
     def do_POST(s):
         if s.guard(): return
+        s.touch_if_api()
         u=urlparse(s.path); me=s.user()
         if u.path in ADMIN_POST and not is_admin(me): return s.send_json({"error":"僅管理員可使用"},403)
         try:
@@ -363,6 +437,8 @@ class H(SimpleHTTPRequestHandler):
                 d=json.loads(s.body()); us=storage.get("users",{}) or {}; n=d.get("username","").strip()
                 if n not in us or not checkpw(d.get("password",""),us[n]):
                     time.sleep(1); return s.send_json({"error":"帳號或密碼錯誤"},401)
+                try: record_login(n)
+                except Exception: pass
                 t=make_token(n)
                 sec="; Secure" if s.headers.get("X-Forwarded-Proto")=="https" or any(x in s.headers.get("Host","") for x in ("trycloudflare","ngrok")) else ""
                 b=b'{"ok":true}'; s.send_response(200); s.send_header("Content-Type","application/json")
@@ -506,6 +582,7 @@ class H(SimpleHTTPRequestHandler):
 
     def do_DELETE(s):
         if s.guard(): return
+        s.touch_if_api()
         u=urlparse(s.path)
         if u.path=="/api/presence":
             storage.delete_presence(s.user()); return s.send_json({"ok":True,"stopped":True})
